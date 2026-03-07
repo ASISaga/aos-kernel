@@ -1,3 +1,8 @@
+---
+applyTo: "src/**/*.py,tests/**/*.py"
+description: "AOS kernel architecture overview and technology stack reference"
+---
+
 # Architecture and Technology Stack
 
 ## Core Concept: Perpetual vs Task-Based

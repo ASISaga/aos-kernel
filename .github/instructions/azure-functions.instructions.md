@@ -1,160 +1,149 @@
 ---
-applyTo: "src/**/*.py,function_app.py,tests/**/*.py"
-description: "Azure Functions and AOS workflow patterns for Python repositories"
+applyTo: "src/**/*.py,tests/**/*.py"
+description: "AOS kernel patterns: Foundry Agent Service, orchestration, messaging, and A2A tool enrollment"
 ---
 
-# Azure Functions & AOS Workflow Patterns
+# AOS Kernel Patterns
 
-## AOSApp Setup
+## Kernel Initialization
 
-Every workflow module starts with a single `AOSApp` instance:
+The kernel façade (`AgentOperatingSystem`) wires together all subsystems. Always initialize before use:
 
 ```python
-from aos_client import AOSApp, ObservabilityConfig
+from AgentOperatingSystem import AgentOperatingSystem
 
-# App name comes from repository spec — see .github/specs/repository.md
-app = AOSApp(
-    name="<app-name>",
-    observability=ObservabilityConfig(
-        structured_logging=True,
-        correlation_tracking=True,
-        health_checks=["aos", "service-bus"],
-    ),
+kernel = AgentOperatingSystem()
+await kernel.initialize()
+```
+
+When `FOUNDRY_PROJECT_ENDPOINT` is set, the kernel connects to the Azure AI Foundry Agent Service automatically.
+
+## Agent Registration
+
+```python
+await kernel.register_agent(
+    agent_id="ceo",
+    purpose="Strategic leadership and executive decision-making",
+    name="CEO Agent",
+    adapter_name="leadership",
+    capabilities=["orchestration", "decision-making"],
+    model="gpt-4o",
 )
 ```
 
-The SDK provisions HTTP triggers, Service Bus triggers, health endpoints, and auth — **no boilerplate needed here**.
+Delegates to `FoundryAgentManager.register_agent`.
 
-## Workflow Registration
-
-```python
-@app.workflow("workflow-name")
-async def workflow_fn(request: WorkflowRequest) -> Dict[str, Any]:
-    ...
-```
-
-- Workflow names use `kebab-case`
-- Return `{"orchestration_id": ..., "status": ...}` for orchestration starters
-- Return plain data dicts for query/lookup workflows
-
-## Azure Functions Entry Point
+## Orchestration Lifecycle
 
 ```python
-# function_app.py — zero boilerplate
-from <package>.workflows import app
-functions = app.get_functions()
-```
-
-Never add Azure Functions decorators directly to `function_app.py`.
-
-## Orchestration Patterns
-
-### Perpetual orchestration (most workflows)
-
-```python
-status = await request.client.start_orchestration(
-    agent_ids=agent_ids,
-    purpose="Describe the ongoing goal",
-    purpose_scope="Scope of responsibility",
-    context=request.body,
+# Create a collaborative (default) orchestration
+orch = await kernel.create_orchestration(
+    agent_ids=["ceo", "cfo"],
+    purpose="Quarterly strategic review",
+    purpose_scope="C-suite strategic alignment",
+    workflow="collaborative",   # "sequential" | "hierarchical" | "collaborative"
+    context={"fiscal_year": 2026},
 )
-return {"orchestration_id": status.orchestration_id, "status": status.status.value}
+
+# Run one agent turn
+result = await kernel.run_agent_turn(
+    orchestration_id=orch["orchestration_id"],
+    agent_id="ceo",
+    message="Begin the strategic review",
+)
+
+# Stop / cancel
+await kernel.stop_orchestration(orch["orchestration_id"])
+await kernel.cancel_orchestration(orch["orchestration_id"])
 ```
 
-### Sequential workflow
+## A2A Tool Enrollment
+
+Enroll specialists as Foundry-compatible A2A tool definitions for a coordinator:
 
 ```python
-status = await request.client.start_orchestration(
-    ...,
-    workflow="sequential",
+tool_defs = kernel.enroll_agent_tools(
+    coordinator_id="ceo",
+    specialist_ids=["cfo", "cto", "cso"],
+    thread_id="thread-001",   # optional — injects orchestration context
+)
+# Pass tool_defs to Foundry create_agent(tools=tool_defs)
+```
+
+## Message Bridge
+
+```python
+# Deliver to a PurposeDrivenAgent
+await kernel.send_message_to_agent(
+    agent_id="cfo",
+    message="Provide Q1 budget summary",
+    orchestration_id=orch_id,
+)
+
+# Send agent response back to Foundry
+await kernel.send_message_to_foundry(
+    agent_id="cfo",
+    message="Q1 budget: $4.2M operating, $1.1M capex",
+    orchestration_id=orch_id,
+)
+
+# Broadcast purpose alignment to all agents in an orchestration
+await kernel.broadcast_purpose_alignment(
+    orchestration_id=orch_id,
+    purpose="Drive strategic review",
+    purpose_scope="C-suite alignment",
 )
 ```
 
-### Hierarchical workflow
+## Multi-LoRA Adapter Resolution
 
 ```python
-status = await request.client.start_orchestration(
-    ...,
-    workflow="hierarchical",
+adapters = kernel.resolve_lora_adapters(
+    orchestration_type="strategic",
+    step_name="analysis",
+    agent_ids=["ceo", "cfo"],
 )
+# Returns list of adapter record dicts for Foundry to activate
 ```
 
-### Advanced: `OrchestrationRequest` with MCP servers
+## Health Check
 
 ```python
-from aos_client import MCPServerConfig, OrchestrationPurpose, OrchestrationRequest
-
-req = OrchestrationRequest(
-    agent_ids=agent_ids,
-    purpose=OrchestrationPurpose(purpose=..., purpose_scope=...),
-    context=request.body,
-    mcp_servers={agent_id: [MCPServerConfig(server_name="erp")]},
-)
-status = await request.client.submit_orchestration(req)
+health = await kernel.health_check()
+# {
+#   "status": "healthy",
+#   "environment": "production",
+#   "foundry_connected": True,
+#   "agents_registered": 5,
+#   "active_orchestrations": 2,
+#   "messages_bridged": 42,
+#   "lora_adapters_registered": 3,
+# }
 ```
 
-## Update Handlers
+## Subsystem Access
+
+Access subsystems directly for advanced use:
 
 ```python
-@app.on_orchestration_update("workflow-name")
-async def handle_update(update) -> None:
-    logger.info("Update from %s: %s", update.agent_id, update.output)
-```
-
-## MCP Tool Registration
-
-```python
-@app.mcp_tool("tool-name")
-async def my_tool(request) -> Any:
-    return await request.client.call_mcp_tool("server", "method", request.body)
-```
-
-## C-Suite Agent Selection Pattern
-
-```python
-C_SUITE_AGENT_IDS = ["ceo", "cfo", "cmo", "coo", "cto", "cso"]
-C_SUITE_TYPES = {"LeadershipAgent", "CMOAgent", "CEOAgent", "CFOAgent", "CTOAgent", "CSOAgent"}
-
-async def select_c_suite_agents(client: AOSClient) -> List[AgentDescriptor]:
-    all_agents = await client.list_agents()
-    by_id = {a.agent_id: a for a in all_agents}
-    selected = [by_id[aid] for aid in C_SUITE_AGENT_IDS if aid in by_id]
-    if not selected:
-        selected = [a for a in all_agents if a.agent_type in C_SUITE_TYPES]
-    return selected
-```
-
-## Workflow Template (Reuse Pattern)
-
-```python
-from aos_client import workflow_template
-
-@workflow_template
-async def c_suite_orchestration(request, agent_filter, purpose, purpose_scope):
-    agents = await select_c_suite_agents(request.client)
-    agent_ids = [a.agent_id for a in agents if agent_filter(a)]
-    if not agent_ids:
-        raise ValueError("No matching agents available in the catalog")
-    status = await request.client.start_orchestration(
-        agent_ids=agent_ids, purpose=purpose, purpose_scope=purpose_scope,
-        context=request.body,
-    )
-    return {"orchestration_id": status.orchestration_id, "status": status.status.value}
+kernel.agent_manager          # FoundryAgentManager
+kernel.orchestration_engine   # FoundryOrchestrationEngine
+kernel.message_bridge         # FoundryMessageBridge
+kernel.lora_registry          # LoRAAdapterRegistry
+kernel.lora_inference         # LoRAInferenceClient
+kernel.lora_router            # LoRAOrchestrationRouter
 ```
 
 ## Validation
 
 ```bash
-pytest tests/ -v                    # Run all tests
-pytest tests/ -v -k "workflow"      # Run workflow-specific tests
-pylint src/                          # Lint workflows
+pytest tests/ -v --asyncio-mode=auto    # Run all tests
+pytest tests/test_kernel.py -v          # Kernel façade tests
+pylint src/AgentOperatingSystem          # Lint
 ```
 
 ## Related Documentation
 
 → **Repository spec**: `.github/specs/repository.md`  
 → **Python standards**: `.github/instructions/python.instructions.md`  
-→ **Conventional tools**: `.github/docs/conventional-tools.md`  
-→ **Architecture**: `/docs/specifications/architecture.md`  
-→ **Agent guidelines**: `/docs/specifications/github-copilot-agent-guidelines.md`  
-→ **Build & deployment**: `/docs/specifications/build-deployment.md`
+→ **Architecture**: `.github/instructions/architecture.instructions.md`
