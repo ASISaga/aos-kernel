@@ -1,3 +1,8 @@
+---
+applyTo: "src/**/*.py,tests/**/*.py"
+description: "Development workflow, testing, and best practices for aos-kernel"
+---
+
 # Development Workflow and Best Practices
 
 ## Setup

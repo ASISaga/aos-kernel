@@ -1,3 +1,8 @@
+---
+applyTo: "src/**/*.py,tests/**/*.py"
+description: "Code quality standards and Pylint integration for aos-kernel"
+---
+
 # Code Quality Instructions for AOS
 
 ## Overview
