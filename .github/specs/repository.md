@@ -1,12 +1,12 @@
 # aos-kernel Repository Specification
 
-**Version**: 1.0.0  
+**Version**: 2.0.0  
 **Status**: Active  
-**Last Updated**: 2026-03-07
+**Last Updated**: 2026-03-17
 
 ## Overview
 
-`aos-kernel` is the OS kernel for the Agent Operating System (AOS). It provides the core infrastructure that perpetual agents run on: Foundry Agent Service integration, A2A tool enrollment, orchestration engine, message bridge, Multi-LoRA inference, reliability patterns, observability, and governance.
+`aos-kernel` is the OS kernel for the Agent Operating System (AOS). It provides the core infrastructure that perpetual agents run on: Foundry Agent Service native integration (via `azure-ai-projects` / `azure-ai-agents` SDK), A2A tool enrollment, orchestration engine, message bridge, Multi-LoRA inference, reliability patterns, observability, and governance.
 
 ## Scope
 
@@ -19,9 +19,10 @@
 
 | Concern | Owner |
 |---------|-------|
-| Agent registration, thread/run lifecycle via Azure AI Foundry | **aos-kernel** (`FoundryAgentManager`) |
-| Orchestration lifecycle (create, run, stop, cancel) | **aos-kernel** (`FoundryOrchestrationEngine`) |
-| Bidirectional message passing (PurposeDrivenAgent ↔ Foundry) | **aos-kernel** (`FoundryMessageBridge`) |
+| Agent CRUD via Foundry Agent Service (`agents.create_agent` / `update_agent` / `delete_agent`) | **aos-kernel** (`FoundryAgentManager`) |
+| Foundry-native tools (code_interpreter, file_search, bing_grounding, azure_ai_search, openapi, function) | **aos-kernel** (`FoundryAgentManager.register_agent(tools=...)`) |
+| Thread/run lifecycle via Foundry (`create_thread`, `create_message`, `create_and_process_run`) | **aos-kernel** (`FoundryOrchestrationEngine`) |
+| Bidirectional message passing (PurposeDrivenAgent ↔ Foundry threads) | **aos-kernel** (`FoundryMessageBridge`) |
 | A2A tool enrollment — specialists as tools for coordinators | **aos-kernel** (`AgentOperatingSystem.enroll_agent_tools`) |
 | Multi-LoRA adapter registry, inference, routing | **aos-kernel** (via `aos-intelligence`) |
 | Reliability, observability, governance | **aos-kernel** (subsystem modules) |
@@ -34,8 +35,8 @@
 | Component | Technology |
 |-----------|-----------|
 | Runtime | Python 3.10+ |
-| Primary SDK | `azure-ai-projects>=2.0.0b4` — Foundry Agent Service |
-| Agent SDK | `azure-ai-agents>=1.1.0` — `AgentsClient` within AI Project |
+| Primary SDK | `azure-ai-projects>=2.0.0b4` — `AIProjectClient` for Foundry Agent Service |
+| Agent SDK | `azure-ai-agents>=1.1.0` — `AgentsClient` (agent CRUD, threads, messages, runs) |
 | Auth | `azure-identity>=1.25.0` — Managed Identity / DefaultAzureCredential |
 | Agent base | `purpose-driven-agent>=1.0.0` — `PurposeDrivenAgent` base class |
 | Orchestration | `leadership-agent>=1.0.0` — leadership + orchestration capabilities |
@@ -51,9 +52,9 @@
 aos-kernel/
 ├── src/AgentOperatingSystem/
 │   ├── agent_operating_system.py  # Top-level kernel façade
-│   ├── _foundry_internal.py       # Internal Foundry service wiring
-│   ├── agents/                    # FoundryAgentManager — agent registration
-│   ├── orchestration/             # FoundryOrchestrationEngine — lifecycle
+│   ├── _foundry_internal.py       # AIProjectClient / AgentsClient creation
+│   ├── agents/                    # FoundryAgentManager — agent CRUD via Foundry
+│   ├── orchestration/             # FoundryOrchestrationEngine — thread/run lifecycle
 │   ├── messaging/                 # FoundryMessageBridge — message passing
 │   ├── config/                    # KernelConfig — environment configuration
 │   ├── auth/                      # Authentication & authorization
@@ -82,7 +83,7 @@ await kernel.initialize()
 
 When `FOUNDRY_PROJECT_ENDPOINT` is set in the environment, the kernel automatically creates an `AIProjectClient` and connects to the Foundry Agent Service.
 
-### Agent Registration
+### Agent Registration with Foundry-Native Tools
 
 ```python
 await kernel.register_agent(
@@ -90,13 +91,28 @@ await kernel.register_agent(
     purpose="Strategic leadership and executive decision-making",
     name="CEO Agent",
     adapter_name="leadership",
+    tools=[{"type": "code_interpreter"}, {"type": "file_search"}],
+    tool_resources={"file_search": {"vector_store_ids": ["vs-001"]}},
+    temperature=0.7,
+    metadata={"department": "executive"},
 )
 ```
 
-### Orchestration Lifecycle
+### Agent Update
 
 ```python
-# Create a purpose-driven orchestration
+await kernel.update_agent(
+    agent_id="ceo",
+    purpose="Updated strategic vision",
+    temperature=0.5,
+    tools=[{"type": "code_interpreter"}],
+)
+```
+
+### Orchestration Lifecycle (Foundry Threads/Runs)
+
+```python
+# Create a purpose-driven orchestration (creates a Foundry thread)
 orch = await kernel.create_orchestration(
     agent_ids=["ceo", "cfo"],
     purpose="Quarterly strategic review",
@@ -104,15 +120,21 @@ orch = await kernel.create_orchestration(
     workflow="collaborative",  # or "sequential", "hierarchical"
 )
 
-# Run a single agent turn
+# Run a single agent turn (posts message + creates run in Foundry)
 result = await kernel.run_agent_turn(
     orchestration_id=orch["orchestration_id"],
     agent_id="ceo",
     message="Initiate strategic review",
 )
 
-# Stop or cancel
+# Retrieve thread messages from Foundry
+messages = await kernel.get_thread_messages(orch["orchestration_id"])
+
+# Stop (cancels in-progress Foundry runs) or cancel
 await kernel.stop_orchestration(orch["orchestration_id"])
+
+# Delete the Foundry thread
+await kernel.delete_thread(orch["orchestration_id"])
 ```
 
 ### A2A Tool Enrollment
@@ -151,7 +173,7 @@ status = await kernel.health_check()
 # Install dev dependencies
 pip install -e ".[dev]"
 
-# Run all tests
+# Run all tests (128 tests)
 pytest tests/ -v --asyncio-mode=auto
 
 # Run with coverage
@@ -188,7 +210,7 @@ mypy src/AgentOperatingSystem
 
 ## Key Design Principles
 
-1. **Foundry-first** — All orchestration is managed exclusively by the Azure AI Foundry Agent Service; no legacy custom orchestration path
+1. **Foundry-native** — All agent/orchestration operations use the `azure-ai-projects` / `azure-ai-agents` SDK directly; no wrapper layers or legacy frameworks
 2. **Perpetual agents** — Agents register once and run indefinitely, awakening on events
 3. **Purpose-driven** — Every orchestration has a stated `purpose` and optional `purpose_scope`; agents work toward it continuously
 4. **Thin façade** — `AgentOperatingSystem` delegates to subsystem managers; keep the façade thin and subsystems focused
