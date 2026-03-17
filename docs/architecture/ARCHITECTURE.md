@@ -26,7 +26,7 @@
 
 ## 🎯 Executive Summary
 
-The **Agent Operating System (AOS)** is a complete, production-grade operating system for AI agents built on Microsoft Azure and the Microsoft Agent Framework. Just as traditional operating systems provide foundational infrastructure for applications, AOS provides the **kernel, system services, runtime environment, and application framework** for autonomous AI agents.
+The **Agent Operating System (AOS)** is a complete, production-grade operating system for AI agents built on Microsoft Azure and the Azure AI Foundry Agent Service. Just as traditional operating systems provide foundational infrastructure for applications, AOS provides the **kernel, system services, runtime environment, and application framework** for autonomous AI agents.
 
 ### The Core Architectural Difference: Perpetual vs Task-Based
 
@@ -498,7 +498,7 @@ Operation          Governance          Storage          Monitor
 
 | Category | Technology | Purpose |
 |----------|-----------|---------|
-| Agent Framework | Microsoft Agent Framework | Core agent capabilities |
+| Foundry Agent Service | Azure AI Foundry Agent Service | Core agent capabilities |
 | Async Runtime | asyncio, aiohttp | Asynchronous operations |
 | Data Validation | Pydantic | Data models and validation |
 | API Framework | FastAPI | REST API endpoints |
@@ -762,7 +762,7 @@ System Metrics
 
 **Decision:** Azure-first with abstraction for multi-cloud
 
-**Context:** Integration with Microsoft Agent Framework
+**Context:** Integration with Azure AI Foundry Agent Service
 
 **Consequences:**
 - ✅ Deep Azure integration
