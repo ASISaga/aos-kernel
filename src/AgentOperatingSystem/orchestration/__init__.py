@@ -202,10 +202,15 @@ class FoundryOrchestrationEngine:
                 messages = self.project_client.agents.list_messages(
                     thread_id=record["thread_id"],
                 )
-                return [
-                    {"role": m.role, "content": m.content, "id": m.id}
-                    for m in messages.data
-                ]
+                result = []
+                for m in messages.data:
+                    # Handle structured content (list of content blocks)
+                    content = m.content
+                    if isinstance(content, list) and content:
+                        text_block = content[0]
+                        content = getattr(getattr(text_block, "text", None), "value", str(text_block))
+                    result.append({"role": m.role, "content": content, "id": m.id})
+                return result
             except Exception as exc:
                 logger.warning("Failed to list thread messages: %s", exc)
 

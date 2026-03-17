@@ -150,7 +150,7 @@ class TestFoundryOrchestrationEngine:
     @pytest.mark.asyncio
     async def test_get_thread_messages(self):
         engine = FoundryOrchestrationEngine()
-        orch = await engine.create_orchestration(["ceo"], "Review")
+        orch = await engine.create_orchestration(["ceo", "cfo"], "Review")
         oid = orch["orchestration_id"]
         await engine.run_agent_turn(oid, "ceo", "Strategy?")
         await engine.run_agent_turn(oid, "cfo", "Budget?")
