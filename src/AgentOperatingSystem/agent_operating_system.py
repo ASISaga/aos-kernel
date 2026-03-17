@@ -3,13 +3,13 @@
 The :class:`AgentOperatingSystem` class is the top-level façade that wires
 together all kernel subsystems:
 
-* **FoundryAgentManager** — PurposeDrivenAgent ↔ Foundry registration.
-* **FoundryOrchestrationEngine** — orchestration lifecycle via Foundry threads/runs.
+* **FoundryAgentManager** — agent lifecycle management via Foundry Agent Service.
+* **FoundryOrchestrationEngine** — orchestration via Foundry threads/runs.
 * **FoundryMessageBridge** — bidirectional message passing.
 * **KernelConfig** — configuration from environment / Bicep parameters.
 
-All orchestration is managed exclusively by the Foundry Agent Service.
-There is no legacy custom orchestration path.
+All orchestration is managed natively through the Foundry Agent Service
+(``azure-ai-projects`` / ``azure-ai-agents`` SDK).
 
 Typical usage in an Azure Function::
 
@@ -18,14 +18,15 @@ Typical usage in an Azure Function::
     kernel = AgentOperatingSystem()
     await kernel.initialize()
 
-    # Register an agent
+    # Register an agent with Foundry-native tools
     await kernel.register_agent(
         agent_id="ceo",
         purpose="Strategic leadership and executive decision-making",
         adapter_name="leadership",
+        tools=[{"type": "code_interpreter"}, {"type": "file_search"}],
     )
 
-    # Create an orchestration
+    # Create an orchestration backed by a Foundry thread
     orch = await kernel.create_orchestration(
         agent_ids=["ceo", "cfo"],
         purpose="Quarterly strategic review",
@@ -47,7 +48,7 @@ logger = logging.getLogger(__name__)
 
 
 class AgentOperatingSystem:
-    """The AOS Kernel — manages agent orchestrations via Foundry Agent Service.
+    """The AOS Kernel — manages agents natively through the Foundry Agent Service.
 
     :param config: Kernel configuration.  When ``None``, configuration is
         loaded from environment variables.
@@ -65,7 +66,6 @@ class AgentOperatingSystem:
     ) -> None:
         self.config = config or KernelConfig.from_env()
         self._project_client = project_client
-        self._foundry_service: Any = None
         self._initialized = False
 
         # Subsystems
@@ -74,7 +74,7 @@ class AgentOperatingSystem:
             default_model=self.config.default_model,
         )
         self.orchestration_engine = FoundryOrchestrationEngine(
-            foundry_service=None,  # set during initialize()
+            project_client=project_client,
             agent_manager=self.agent_manager,
         )
         self.message_bridge = FoundryMessageBridge(
@@ -104,24 +104,25 @@ class AgentOperatingSystem:
         if self._initialized:
             return
 
-        # Try to create a FoundryAgentService if we have a project client
-        if self._project_client is not None:
+        # Auto-create project client from config if not provided
+        if self._project_client is None and self.config.foundry_project_endpoint:
             try:
-                from AgentOperatingSystem._foundry_internal import _create_foundry_service
+                from AgentOperatingSystem._foundry_internal import _create_project_client
 
-                self._foundry_service = _create_foundry_service(
-                    self._project_client,
-                    self.config.ai_gateway_url,
+                self._project_client = _create_project_client(
+                    endpoint=self.config.foundry_project_endpoint,
                 )
-                self.orchestration_engine.foundry_service = self._foundry_service
+                # Wire project client into subsystems
+                self.agent_manager.project_client = self._project_client
+                self.orchestration_engine.project_client = self._project_client
             except Exception as exc:
-                logger.warning("Failed to create FoundryAgentService: %s", exc)
+                logger.warning("Failed to create AIProjectClient: %s", exc)
 
         self._initialized = True
         logger.info(
             "AOS Kernel initialized (environment=%s, foundry=%s)",
             self.config.environment,
-            "connected" if self._foundry_service else "local",
+            "connected" if self._project_client else "local",
         )
 
     async def shutdown(self) -> None:
@@ -142,8 +143,13 @@ class AgentOperatingSystem:
         capabilities: Optional[List[str]] = None,
         model: Optional[str] = None,
         tools: Optional[List[dict]] = None,
+        tool_resources: Optional[Dict[str, Any]] = None,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        response_format: Optional[str] = None,
+        metadata: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
-        """Register a PurposeDrivenAgent with the Foundry Agent Service.
+        """Register an agent with the Foundry Agent Service.
 
         See :meth:`FoundryAgentManager.register_agent` for details.
         """
@@ -155,6 +161,39 @@ class AgentOperatingSystem:
             capabilities=capabilities,
             model=model,
             tools=tools,
+            tool_resources=tool_resources,
+            temperature=temperature,
+            top_p=top_p,
+            response_format=response_format,
+            metadata=metadata,
+        )
+
+    async def update_agent(
+        self,
+        agent_id: str,
+        purpose: Optional[str] = None,
+        name: Optional[str] = None,
+        model: Optional[str] = None,
+        tools: Optional[List[dict]] = None,
+        tool_resources: Optional[Dict[str, Any]] = None,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        metadata: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """Update an existing Foundry agent's configuration.
+
+        See :meth:`FoundryAgentManager.update_agent` for details.
+        """
+        return await self.agent_manager.update_agent(
+            agent_id=agent_id,
+            purpose=purpose,
+            name=name,
+            model=model,
+            tools=tools,
+            tool_resources=tool_resources,
+            temperature=temperature,
+            top_p=top_p,
+            metadata=metadata,
         )
 
     async def unregister_agent(self, agent_id: str) -> None:
@@ -174,7 +213,7 @@ class AgentOperatingSystem:
         workflow: str = "collaborative",
         mcp_servers: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Create a purpose-driven orchestration.
+        """Create a purpose-driven orchestration backed by a Foundry thread.
 
         See :meth:`FoundryOrchestrationEngine.create_orchestration` for details.
         """
@@ -193,7 +232,7 @@ class AgentOperatingSystem:
         agent_id: str,
         message: str,
     ) -> Dict[str, Any]:
-        """Execute a single agent turn."""
+        """Execute a single agent turn via a Foundry run."""
         return await self.orchestration_engine.run_agent_turn(
             orchestration_id=orchestration_id,
             agent_id=agent_id,
@@ -204,6 +243,10 @@ class AgentOperatingSystem:
         """Get orchestration status."""
         return await self.orchestration_engine.get_status(orchestration_id)
 
+    async def get_thread_messages(self, orchestration_id: str) -> List[Dict[str, Any]]:
+        """Retrieve all messages from the orchestration's Foundry thread."""
+        return await self.orchestration_engine.get_thread_messages(orchestration_id)
+
     async def stop_orchestration(self, orchestration_id: str) -> None:
         """Stop an orchestration."""
         await self.orchestration_engine.stop_orchestration(orchestration_id)
@@ -211,6 +254,10 @@ class AgentOperatingSystem:
     async def cancel_orchestration(self, orchestration_id: str) -> None:
         """Cancel an orchestration."""
         await self.orchestration_engine.cancel_orchestration(orchestration_id)
+
+    async def delete_thread(self, orchestration_id: str) -> None:
+        """Delete the Foundry thread for an orchestration."""
+        await self.orchestration_engine.delete_thread(orchestration_id)
 
     # ------------------------------------------------------------------
     # Multi-LoRA (delegates to LoRAOrchestrationRouter / LoRAInferenceClient)
@@ -377,7 +424,7 @@ class AgentOperatingSystem:
         return {
             "status": "healthy" if self._initialized else "not_initialized",
             "environment": self.config.environment,
-            "foundry_connected": self._foundry_service is not None,
+            "foundry_connected": self._project_client is not None,
             "agents_registered": self.agent_manager.agent_count,
             "active_orchestrations": self.orchestration_engine.orchestration_count,
             "messages_bridged": self.message_bridge.message_count,

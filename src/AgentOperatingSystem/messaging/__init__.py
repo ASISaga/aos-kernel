@@ -1,4 +1,4 @@
-"""Messaging bridge — bidirectional communication between PurposeDrivenAgent and Foundry.
+"""Messaging bridge — bidirectional communication via Foundry threads.
 
 :class:`FoundryMessageBridge` connects the local PurposeDrivenAgent event/message
 system with Foundry conversation threads.  Messages flow in both directions:
@@ -7,6 +7,9 @@ system with Foundry conversation threads.  Messages flow in both directions:
   ``handle_message`` calls on the PurposeDrivenAgent.
 * **Outbound** (PDA → Foundry): Agent responses and events are posted back to
   the Foundry thread so the orchestration has a complete conversation history.
+
+All messages are posted directly to Foundry threads via the ``AgentsClient``
+(from ``azure-ai-projects``).
 """
 
 from __future__ import annotations

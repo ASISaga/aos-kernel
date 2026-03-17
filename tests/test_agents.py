@@ -130,3 +130,72 @@ class TestFoundryAgentManager:
             tools=tools,
         )
         assert record["tools"] == tools
+
+    @pytest.mark.asyncio
+    async def test_register_with_tool_resources(self):
+        manager = FoundryAgentManager()
+        record = await manager.register_agent(
+            agent_id="researcher",
+            purpose="Research",
+            tools=[{"type": "file_search"}],
+            tool_resources={"file_search": {"vector_store_ids": ["vs-001"]}},
+        )
+        assert record["tool_resources"]["file_search"]["vector_store_ids"] == ["vs-001"]
+
+    @pytest.mark.asyncio
+    async def test_register_with_temperature_and_top_p(self):
+        manager = FoundryAgentManager()
+        record = await manager.register_agent(
+            agent_id="creative",
+            purpose="Creative work",
+            temperature=0.8,
+            top_p=0.9,
+        )
+        assert record["temperature"] == 0.8
+        assert record["top_p"] == 0.9
+
+    @pytest.mark.asyncio
+    async def test_register_with_response_format(self):
+        manager = FoundryAgentManager()
+        record = await manager.register_agent(
+            agent_id="json_agent",
+            purpose="JSON output",
+            response_format="json_object",
+        )
+        assert record["response_format"] == "json_object"
+
+    @pytest.mark.asyncio
+    async def test_register_with_metadata(self):
+        manager = FoundryAgentManager()
+        record = await manager.register_agent(
+            agent_id="ceo",
+            purpose="Leadership",
+            metadata={"department": "executive"},
+        )
+        assert record["metadata"]["department"] == "executive"
+
+    @pytest.mark.asyncio
+    async def test_update_agent(self):
+        manager = FoundryAgentManager()
+        await manager.register_agent("ceo", "Strategic leadership")
+        updated = await manager.update_agent(
+            agent_id="ceo",
+            purpose="Updated vision",
+            temperature=0.5,
+        )
+        assert updated["purpose"] == "Updated vision"
+        assert updated["temperature"] == 0.5
+
+    @pytest.mark.asyncio
+    async def test_update_agent_not_found(self):
+        manager = FoundryAgentManager()
+        with pytest.raises(KeyError, match="not registered"):
+            await manager.update_agent("nonexistent", purpose="New purpose")
+
+    @pytest.mark.asyncio
+    async def test_update_agent_partial(self):
+        manager = FoundryAgentManager()
+        await manager.register_agent("ceo", "Lead", name="CEO Agent")
+        updated = await manager.update_agent(agent_id="ceo", name="Chief Executive")
+        assert updated["name"] == "Chief Executive"
+        assert updated["purpose"] == "Lead"  # unchanged

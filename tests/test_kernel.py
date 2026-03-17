@@ -10,7 +10,7 @@ class TestKernelVersion:
     """Version tests."""
 
     def test_version(self):
-        assert __version__ == "5.0.0"
+        assert __version__ == "6.0.0"
 
 
 class TestAgentOperatingSystem:
@@ -336,3 +336,136 @@ class TestA2AToolEnrollment:
         for tool in tools:
             assert tool["agent"]["thread_id"] == "orchestration-thread-001"
             assert tool["type"] == "agent"
+
+
+class TestFoundryNativeCapabilities:
+    """Tests for Foundry Agent Service native capabilities."""
+
+    @pytest.mark.asyncio
+    async def test_register_agent_with_tool_resources(self):
+        kernel = AgentOperatingSystem()
+        await kernel.initialize()
+        record = await kernel.register_agent(
+            agent_id="analyst",
+            purpose="Data analysis",
+            tools=[{"type": "file_search"}],
+            tool_resources={"file_search": {"vector_store_ids": ["vs-123"]}},
+        )
+        assert record["tools"] == [{"type": "file_search"}]
+        assert record["tool_resources"]["file_search"]["vector_store_ids"] == ["vs-123"]
+
+    @pytest.mark.asyncio
+    async def test_register_agent_with_temperature(self):
+        kernel = AgentOperatingSystem()
+        await kernel.initialize()
+        record = await kernel.register_agent(
+            agent_id="creative",
+            purpose="Creative writing",
+            temperature=0.9,
+            top_p=0.95,
+        )
+        assert record["temperature"] == 0.9
+        assert record["top_p"] == 0.95
+
+    @pytest.mark.asyncio
+    async def test_register_agent_with_response_format(self):
+        kernel = AgentOperatingSystem()
+        await kernel.initialize()
+        record = await kernel.register_agent(
+            agent_id="data",
+            purpose="Data extraction",
+            response_format="json_object",
+        )
+        assert record["response_format"] == "json_object"
+
+    @pytest.mark.asyncio
+    async def test_register_agent_with_metadata(self):
+        kernel = AgentOperatingSystem()
+        await kernel.initialize()
+        record = await kernel.register_agent(
+            agent_id="ceo",
+            purpose="Leadership",
+            metadata={"department": "executive", "tier": "1"},
+        )
+        assert record["metadata"]["department"] == "executive"
+
+    @pytest.mark.asyncio
+    async def test_update_agent(self):
+        kernel = AgentOperatingSystem()
+        await kernel.initialize()
+        await kernel.register_agent("ceo", "Strategic leadership")
+        updated = await kernel.update_agent(
+            agent_id="ceo",
+            purpose="Updated strategic vision",
+            temperature=0.7,
+        )
+        assert updated["purpose"] == "Updated strategic vision"
+        assert updated["temperature"] == 0.7
+
+    @pytest.mark.asyncio
+    async def test_update_agent_not_registered(self):
+        kernel = AgentOperatingSystem()
+        await kernel.initialize()
+        with pytest.raises(KeyError, match="not registered"):
+            await kernel.update_agent("nonexistent", purpose="New purpose")
+
+    @pytest.mark.asyncio
+    async def test_get_thread_messages(self):
+        kernel = AgentOperatingSystem()
+        await kernel.initialize()
+        orch = await kernel.create_orchestration(["ceo"], "Review")
+        await kernel.run_agent_turn(orch["orchestration_id"], "ceo", "Strategy?")
+        messages = await kernel.get_thread_messages(orch["orchestration_id"])
+        assert len(messages) == 1
+        assert messages[0]["content"] == "Strategy?"
+
+    @pytest.mark.asyncio
+    async def test_delete_thread(self):
+        kernel = AgentOperatingSystem()
+        await kernel.initialize()
+        orch = await kernel.create_orchestration(["ceo"], "Review")
+        oid = orch["orchestration_id"]
+        await kernel.delete_thread(oid)
+        with pytest.raises(KeyError):
+            await kernel.get_orchestration_status(oid)
+
+    @pytest.mark.asyncio
+    async def test_register_agent_with_code_interpreter(self):
+        kernel = AgentOperatingSystem()
+        await kernel.initialize()
+        record = await kernel.register_agent(
+            agent_id="developer",
+            purpose="Code development",
+            tools=[{"type": "code_interpreter"}],
+        )
+        assert record["tools"] == [{"type": "code_interpreter"}]
+
+    @pytest.mark.asyncio
+    async def test_register_agent_with_multiple_tools(self):
+        kernel = AgentOperatingSystem()
+        await kernel.initialize()
+        tools = [
+            {"type": "code_interpreter"},
+            {"type": "file_search"},
+        ]
+        record = await kernel.register_agent(
+            agent_id="analyst",
+            purpose="Analysis",
+            tools=tools,
+        )
+        assert len(record["tools"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_orchestration_has_thread_id(self):
+        kernel = AgentOperatingSystem()
+        await kernel.initialize()
+        orch = await kernel.create_orchestration(["ceo"], "Review")
+        assert orch["thread_id"]  # thread_id should be populated
+
+    @pytest.mark.asyncio
+    async def test_health_check_foundry_connected(self):
+        """Kernel without project client reports foundry_connected=False."""
+        kernel = AgentOperatingSystem()
+        await kernel.initialize()
+        health = await kernel.health_check()
+        assert health["foundry_connected"] is False

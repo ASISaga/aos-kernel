@@ -1,11 +1,11 @@
 [build-system]
 requires = ["setuptools>=75.0.0", "wheel"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "aos-kernel"
-version = "5.0.0"
-description = "Agent Operating System Kernel — Foundry Agent Service based orchestration, messaging, and agent management with Multi-LoRA inference"
+version = "6.0.0"
+description = "Agent Operating System Kernel — Foundry Agent Service native orchestration, messaging, and agent management with Multi-LoRA inference"
 readme = "README.md"
 license = { text = "Apache-2.0" }
 authors = [{ name = "ASISaga", email = "opensource@asisaga.com" }]
@@ -47,8 +47,6 @@ dependencies = [
     "opentelemetry-sdk>=1.30.0",
     "opentelemetry-exporter-otlp-proto-grpc>=1.30.0",
     "opentelemetry-instrumentation-fastapi>=0.51b0",
-    "agent-framework>=1.0.0rc1",
-    "agent-framework-orchestrations>=1.0.0b260219",
     "aos-intelligence>=2.0.0",
 ]
 
@@ -64,7 +62,6 @@ azure = [
     "azure-ai-projects>=2.0.0b4",
     "azure-ai-ml>=1.26.0",
     "azure-ai-inference>=1.0.0b9",
-    "agent-framework-azure-ai>=1.0.0rc1",
 ]
 full = [
     "aos-kernel[azure]",
