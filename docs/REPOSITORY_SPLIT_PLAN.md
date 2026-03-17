@@ -1,0 +1,1285 @@
+# Repository Split Plan: AgentOperatingSystem → Multi-Repository Architecture
+
+**Version:** 1.6  
+**Date:** March 2026  
+**Status:** ✅ Completed  
+**Author:** Architecture Analysis  
+**Last Updated:** March 2026 (repository split completed — all 15 repositories created on GitHub under ASISaga organization and registered as submodules)
+
+---
+
+## Table of Contents
+
+- [Executive Summary](#executive-summary)
+- [Current State Analysis](#current-state-analysis)
+- [Proposed Repository Structure](#proposed-repository-structure)
+- [Repository Details](#repository-details)
+  - [1. purpose-driven-agent](#1-purpose-driven-agent)
+  - [2. leadership-agent](#2-leadership-agent)
+  - [3. cmo-agent](#3-cmo-agent)
+  - [4. aos-kernel](#4-aos-kernel)
+  - [5. aos-infrastructure](#5-aos-infrastructure)
+  - [6. aos-intelligence](#6-aos-intelligence)
+  - [7. aos-dispatcher](#7-aos-dispatcher)
+  - [8. aos-realm-of-agents](#8-aos-realm-of-agents)
+  - [9. aos-mcp-servers](#9-aos-mcp-servers)
+  - [10. aos-client-sdk](#10-aos-client-sdk)
+  - [11. business-infinity](#11-business-infinity)
+- [Client Interaction Architecture](#client-interaction-architecture)
+- [Documentation Distribution](#documentation-distribution)
+- [Copilot Extensions Distribution](#copilot-extensions-distribution)
+- [Dependency Graph](#dependency-graph)
+- [Shared Contracts & Interfaces](#shared-contracts--interfaces)
+- [Migration Strategy](#migration-strategy)
+- [Cross-Repository CI/CD](#cross-repository-cicd)
+- [Risks & Mitigations](#risks--mitigations)
+- [Decision Log](#decision-log)
+
+---
+
+## Executive Summary
+
+> **Status Update (March 2026):** The repository split described in this document has been **completed**. All 15 repositories are live on GitHub under the [ASISaga](https://github.com/ASISaga) organization and are registered as submodules in this meta-repository. The sections below are preserved as the architectural record.
+
+The AgentOperatingSystem repository previously contained **198 Python files** (~45,000 LOC), **117 Markdown documents** (~38,000 lines), **9 Bicep infrastructure templates**, **5 CI/CD workflows**, and **8 GitHub Copilot skills** — all in a single repository. These components spanned **4 distinct domains** with different release cadences, team ownership profiles, and dependency chains:
+
+1. **Core OS runtime** (agents, orchestration, messaging, storage, auth, config)
+2. **Infrastructure deployment** (Bicep templates, Python orchestrator, regional validation)
+3. **Agent intelligence** (ML pipelines, LoRA/LoRAx, DPO training, self-learning, knowledge/RAG)
+4. **Azure Functions hosting** — three independent function apps (main entry point, RealmOfAgents, MCPServers)
+
+This plan proposed splitting into **15 focused repositories** under the `ASISaga` GitHub organization, connected via Python package dependencies and shared interface contracts. Documentation and GitHub Copilot extensions (skills, prompts, instructions) are **distributed** to the repositories they belong to rather than centralized in dedicated repos.
+
+The primary purpose of AOS is to provide **agent orchestrations as an infrastructure service** to client applications. Client apps (like BusinessInfinity) stay lean, containing only business logic, while AOS handles agent lifecycle, orchestration, messaging, storage, and monitoring. The `aos-client-sdk` provides a lightweight SDK for this interaction pattern.
+
+---
+
+## Current State Analysis
+
+### Repository Size
+
+| Area | Python Files | Python LOC | Markdown Files | Markdown Lines | Other |
+|------|-------------|------------|----------------|----------------|-------|
+| `src/AgentOperatingSystem/` | 124 | 33,692 | 0 | 0 | — |
+| `tests/` | 20 | 3,423 | 0 | 0 | — |
+| `deployment/` | 27 | 4,574 | 15 | 5,209 | 9 Bicep, 3 bicepparam |
+| `azure_functions/` | 8 | 1,556 | 6 | — | — |
+| `examples/` | 7 | 1,933 | 1 | — | — |
+| `docs/` | 0 | 0 | 54 | 21,595 | — |
+| `.github/` | 3 | — | 38 | 10,972 | 5 YAML workflows |
+| Root | 1 | 332 | 3 | — | pyproject.toml, host.json |
+| `data/` + `knowledge/` + `config/` | 0 | 0 | 0 | 0 | 19 JSON |
+
+**Total: ~198 Python files, ~45,510 Python LOC, ~117 Markdown files, ~37,776 Markdown lines**
+
+### Source Module Sizes (LOC)
+
+| Module | LOC | Domain |
+|--------|-----|--------|
+| `orchestration/` | 6,129 | Core |
+| `messaging/` | 4,245 | Core |
+| `ml/` | 3,159 | Intelligence |
+| `reliability/` | 2,442 | Core |
+| `learning/` | 2,411 | Intelligence |
+| `observability/` | 2,108 | Core |
+| `testing/` | 1,862 | Core |
+| `extensibility/` | 1,619 | Core |
+| `monitoring/` | 1,399 | Core |
+| `agents/` | 1,315 | Core |
+| `governance/` | 1,314 | Core |
+| `mcp/` | 1,049 | Core |
+| `platform/` | 746 | Core |
+| `knowledge/` | 691 | Intelligence |
+| `storage/` | 784 | Core |
+| `config/` | 391 | Core |
+| `auth/` | 381 | Core |
+| `environment/` | 413 | Core |
+| `services/` | 312 | Core |
+| `shared/` | 80 | Core |
+| `apps/` | 178 | Core |
+| `executor/` | 28 | Core |
+
+### Cross-Module Dependency Map
+
+```
+agents       → mcp, ml
+orchestration → agents, config, messaging, ml, monitoring, storage
+messaging    → config
+ml           → config
+learning     → agents, storage
+auth         → config
+storage      → config
+monitoring   → config
+testing      → governance, platform
+```
+
+Key observation: The `orchestration` module is the most coupled, depending on 6 other modules. The `ml` module is imported by `agents` and `orchestration`, creating a tight coupling between core OS and intelligence concerns.
+
+### Problems with Current Structure
+
+1. **Mixed release cadences**: Deployment infrastructure changes independently of core agent runtime; ML models evolve differently than messaging protocols.
+2. **Bloated CI/CD**: Every PR triggers checks across all domains. A docs-only change runs Python tests; a Bicep change runs agent tests.
+3. **Unclear ownership**: No clear team boundaries between infrastructure operators, core runtime developers, ML engineers, and documentation writers.
+4. **Dependency bloat**: Installing the core OS pulls in ML, Azure Functions, and deployment dependencies via transitive imports.
+5. **Documentation sprawl**: 117 markdown files scattered across `docs/`, `.github/`, `deployment/`, root, and `azure_functions/` with significant duplication and cross-referencing challenges.
+6. **Copilot extension lock-in**: Skills, prompts, and instructions are repository-specific but contain general-purpose patterns.
+
+---
+
+## Repository Structure
+
+All 15 repositories are live on GitHub and registered as submodules:
+
+```
+ASISaga/
+├── purpose-driven-agent      # PurposeDrivenAgent — fundamental base class
+├── leadership-agent          # LeadershipAgent — multi-agent orchestration
+├── ceo-agent                 # CEOAgent — executive + boardroom
+├── cfo-agent                 # CFOAgent — finance + boardroom
+├── cto-agent                 # CTOAgent — technology + boardroom
+├── cso-agent                 # CSOAgent — security + boardroom
+├── cmo-agent                 # CMOAgent — marketing + boardroom
+├── aos-kernel                # OS kernel: orchestration, messaging, storage, auth
+├── aos-infrastructure        # Infrastructure: Bicep, orchestrator, regional validation
+├── aos-intelligence          # ML/AI: LoRA, DPO, self-learning, knowledge, RAG
+├── aos-dispatcher            # Orchestration API (Azure Functions)
+├── aos-realm-of-agents       # Agent catalog (Azure Functions)
+├── aos-mcp-servers           # MCP server deployment (Azure Functions)
+├── aos-client-sdk            # App framework & SDK
+└── business-infinity         # Example client app
+```
+
+---
+
+## Repository Details
+
+### 1. purpose-driven-agent
+
+**Purpose:** The fundamental building block of the Agent Operating System. `PurposeDrivenAgent` is the abstract base class from which all AOS agents inherit. It inherits from `agent_framework.Agent` (Microsoft Agent Framework), establishing a clean hierarchy: `Agent → PurposeDrivenAgent → {LeadershipAgent, CMOAgent, ...}`.
+
+**Repository:** https://github.com/ASISaga/purpose-driven-agent
+
+**What moves here:**
+
+```
+src/
+└── purpose_driven_agent/
+    ├── __init__.py                 # Exports: PurposeDrivenAgent, GenericPurposeDrivenAgent
+    ├── agent.py                    # PurposeDrivenAgent + GenericPurposeDrivenAgent
+    ├── ml_interface.py             # IMLService abstract interface (decoupled from aos-intelligence)
+    └── context_server.py           # Lightweight ContextMCPServer (standalone, no Azure deps)
+tests/
+├── conftest.py
+└── test_purpose_driven_agent.py
+examples/
+└── basic_usage.py
+docs/
+├── architecture.md
+├── api-reference.md
+└── contributing.md
+.github/
+├── skills/purpose-driven-agent/SKILL.md    # GitHub Copilot skill
+├── prompts/purpose-driven-expert.md        # Copilot prompt
+├── instructions/purpose-driven-agent.instructions.md
+└── workflows/ci.yml
+pyproject.toml
+README.md
+LICENSE
+```
+
+**Package name:** `purpose-driven-agent`  
+**Install:** `pip install purpose-driven-agent`
+
+**Estimated size:** ~900 Python LOC + ~200 test LOC
+
+**Key design decisions:**
+- Inherits from `agent_framework.Agent` (Microsoft Agent Framework `>=1.0.0rc1`) with a graceful fallback stub when the package is not installed, mirroring the pattern used elsewhere in AOS.
+- No dependency on `aos-kernel`. All ML operations are delegated through the `IMLService` abstract interface defined in `ml_interface.py`; the concrete implementation is registered at runtime by `aos-intelligence`.
+- Lightweight in-process `ContextMCPServer` stub ships with this package; the full Azure-backed implementation is provided by `aos-kernel[azure]` when installed.
+- The `GenericPurposeDrivenAgent` concrete class is included as a minimal concrete implementation for teams that need an off-the-shelf agent without subclassing.
+
+**pyproject.toml dependencies:**
+```toml
+dependencies = [
+    "agent-framework>=1.0.0rc1",
+    "pydantic>=2.12.0",
+]
+
+[project.optional-dependencies]
+azure = [
+    "azure-identity>=1.25.0",
+    "azure-ai-agents>=1.1.0",
+    "azure-ai-projects>=1.0.0",
+    "agent-framework-azure-ai>=1.0.0rc1",
+]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "pylint>=3.0.0",
+]
+```
+
+---
+
+### 2. leadership-agent
+
+**Purpose:** Leadership and decision-making agent. `LeadershipAgent` extends `PurposeDrivenAgent` with decision provenance, stakeholder coordination, consensus building, and delegation patterns. The Leadership purpose is mapped to the "leadership" LoRA adapter.
+
+**Repository:** https://github.com/ASISaga/leadership-agent
+
+**What moves here:**
+
+```
+src/
+└── leadership_agent/
+    ├── __init__.py                 # Exports: LeadershipAgent
+    └── agent.py                    # LeadershipAgent class
+tests/
+├── conftest.py
+└── test_leadership_agent.py
+examples/
+└── basic_usage.py
+docs/
+├── architecture.md
+├── api-reference.md
+└── contributing.md
+.github/
+├── skills/leadership-agent/SKILL.md
+├── prompts/leadership-expert.md
+├── instructions/leadership-agent.instructions.md
+└── workflows/ci.yml
+pyproject.toml
+README.md
+LICENSE
+```
+
+**Package name:** `leadership-agent`  
+**Install:** `pip install leadership-agent`
+
+**Estimated size:** ~200 Python LOC + ~150 test LOC
+
+**pyproject.toml dependencies:**
+```toml
+dependencies = [
+    "purpose-driven-agent>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "pylint>=3.0.0",
+]
+```
+
+---
+
+### 3. cmo-agent
+
+**Purpose:** Chief Marketing Officer agent. `CMOAgent` extends `LeadershipAgent` with marketing-specific capabilities. Maps two purposes to two LoRA adapters: Marketing → "marketing" adapter, Leadership → "leadership" adapter (inherited).
+
+**Repository:** https://github.com/ASISaga/cmo-agent
+
+**What moves here:**
+
+```
+src/
+└── cmo_agent/
+    ├── __init__.py                 # Exports: CMOAgent
+    └── agent.py                    # CMOAgent class
+tests/
+├── conftest.py
+└── test_cmo_agent.py
+examples/
+└── basic_usage.py
+docs/
+├── architecture.md
+├── api-reference.md
+└── contributing.md
+.github/
+├── skills/cmo-agent/SKILL.md
+├── prompts/cmo-expert.md
+├── instructions/cmo-agent.instructions.md
+└── workflows/ci.yml
+pyproject.toml
+README.md
+LICENSE
+```
+
+**Package name:** `cmo-agent`  
+**Install:** `pip install cmo-agent`
+
+**Estimated size:** ~250 Python LOC + ~180 test LOC
+
+**pyproject.toml dependencies:**
+```toml
+dependencies = [
+    "leadership-agent>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "pylint>=3.0.0",
+]
+```
+
+---
+
+### 4. aos-kernel
+
+**Purpose:** The Agent Operating System kernel — orchestration engine, messaging, storage, authentication, and all supporting system services. Renamed from `aos-core` to more accurately reflect its role as an operating system kernel rather than a generic library.
+
+**What moves here:**
+
+```
+src/AgentOperatingSystem/
+├── __init__.py
+├── agent_operating_system.py
+├── agents/                   # Thin compatibility shim — re-exports from published packages
+│   ├── __init__.py           # from purpose_driven_agent import PurposeDrivenAgent, etc.
+│   └── (no source files — agents live in their own repos)
+├── orchestration/            # Full orchestration engine (6,129 LOC)
+├── messaging/                # Message bus, routing, contracts, Service Bus (4,245 LOC)
+├── storage/                  # Storage backends (784 LOC)
+├── auth/                     # Authentication (381 LOC)
+├── config/                   # Configuration classes (391 LOC)
+├── environment/              # Environment manager (413 LOC)
+├── mcp/                      # MCP client, protocol (1,049 LOC)
+├── reliability/              # Circuit breaker, retry, patterns (2,442 LOC)
+├── observability/            # Logging, metrics, tracing (2,108 LOC)
+├── governance/               # Audit, compliance, risk (1,314 LOC)
+├── monitoring/               # System monitor, audit trail (1,399 LOC)
+├── extensibility/            # Plugin framework, registries (1,619 LOC)
+├── platform/                 # Platform contracts, events (746 LOC)
+├── services/                 # Service interfaces (312 LOC)
+├── shared/                   # Shared models (80 LOC)
+├── testing/                  # Test framework (1,862 LOC)
+├── apps/                     # App config (178 LOC)
+└── executor/                 # Base executor (28 LOC)
+tests/
+├── conftest.py
+├── simple_test.py
+├── test_advanced_features.py
+├── test_agent_framework_components.py
+├── test_extensibility.py
+├── test_integration.py
+├── test_new_features.py
+├── test_persona_registry.py
+├── test_purpose_driven_integration.py
+├── test_testing_framework.py
+├── test_testing_standalone.py
+└── validate_implementation.py
+examples/
+├── perpetual_agents_demo.py
+├── perpetual_agents_example.py
+└── platform_integration_example.py
+pyproject.toml              # Kernel dependencies only (no ML, no Azure Functions)
+README.md
+LICENSE
+```
+
+**Package name:** `aos-kernel`  
+**Install:** `pip install aos-kernel` (or `pip install aos-kernel[azure]` for Azure service backends)
+
+**Estimated size:** ~21,000 Python LOC + ~3,000 test LOC (agents module is now a shim)
+
+**Key change — Agents module becomes a compatibility shim:**
+With agents in their own repos, `aos-kernel`'s `agents/` module becomes a thin re-export shim so that existing code using `from AgentOperatingSystem.agents import PurposeDrivenAgent` continues to work:
+```python
+# aos-kernel/src/AgentOperatingSystem/agents/__init__.py
+from purpose_driven_agent import PurposeDrivenAgent, GenericPurposeDrivenAgent
+from leadership_agent import LeadershipAgent
+from cmo_agent import CMOAgent
+```
+
+**Key change — Remove ML dependency from orchestration:**
+Currently `orchestration.py` imports `from ..ml.pipeline import MLPipelineManager`. This coupling must be broken by:
+- Defining abstract interfaces for ML operations in `services/service_interfaces.py`
+- Having `orchestration.py` depend only on the interface
+- The `aos-intelligence` package provides the concrete implementation and registers it at runtime
+
+**pyproject.toml dependencies (kernel only):**
+```toml
+dependencies = [
+    "purpose-driven-agent>=1.0.0",
+    "python-dotenv>=1.1.0",
+    "pydantic>=2.12.0",
+    "fastapi>=0.128.0",
+    "uvicorn>=0.40.0",
+    "psutil>=7.0.0",
+    "PyJWT>=2.10.0",
+    "cryptography>=45.0.0",
+    "httpx>=0.28.0",
+    "jsonschema>=4.23.0",
+    "opentelemetry-api>=1.30.0",
+    "opentelemetry-sdk>=1.30.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.30.0",
+    "opentelemetry-instrumentation-fastapi>=0.51b0",
+    "agent-framework>=1.0.0rc1",
+    "agent-framework-orchestrations>=1.0.0b260219",
+]
+
+[project.optional-dependencies]
+azure = [
+    "azure-identity>=1.25.0",
+    "azure-storage-blob>=12.25.0",
+    "azure-storage-queue>=12.13.0",
+    "azure-data-tables>=12.7.0",
+    "azure-servicebus>=7.14.0",
+    "azure-keyvault-secrets>=4.10.0",
+    "azure-ai-agents>=1.1.0",
+    "azure-ai-projects>=1.0.0",
+    "agent-framework-azure-ai>=1.0.0rc1",
+]
+```
+
+---
+
+### 5. aos-infrastructure
+
+**Purpose:** Infrastructure-as-Code, deployment orchestration, regional validation, and deployment-specific CI/CD workflows.
+
+**What moves here:**
+
+```
+deployment/
+├── main-modular.bicep          # Primary Bicep template
+├── modules/                    # 8 Bicep modules (compute, identity, keyvault, etc.)
+├── parameters/                 # .bicepparam files (dev, staging, prod)
+├── orchestrator/               # Python deployment orchestrator (4,241 LOC)
+│   ├── core/                   # Orchestrator engine, failure classifier, state machine
+│   ├── cli/                    # CLI tools (deploy.py, regional_tool.py, workflow_helper.py)
+│   ├── validators/             # Linter, whatif planner, regional validator
+│   ├── audit/                  # Deployment audit logger
+│   └── health/                 # Health checker
+├── tests/                      # Deployment tests (test_orchestrator.py)
+├── examples/                   # Orchestrator example
+├── docs/                       # Deployment-specific docs (archive, regional validation)
+├── deploy.py                   # Top-level deployment entry point
+├── README.md
+├── ORCHESTRATOR_USER_GUIDE.md
+├── QUICKSTART.md
+└── REGIONAL_REQUIREMENTS.md
+.github/workflows/
+├── infrastructure-deploy.yml       # Agentic deployment workflow
+├── infrastructure-monitoring.yml   # Infrastructure monitoring
+└── infrastructure-troubleshooting.yml  # Troubleshooting workflow
+.github/agents/
+└── infrastructure-deploy.agent.md
+.github/skills/
+├── deployment-error-fixer/         # Deployment error fixer skill (6 files)
+└── azure-troubleshooting/          # Azure troubleshooting skill (2 files)
+Root files:
+├── DEPLOYMENT_DOCS_SUMMARY.md
+└── REGIONAL_HANDLING_SUMMARY.md
+docs/development/
+├── DEPLOYMENT_PLAN.md
+└── DEPLOYMENT_TASKS.md
+docs/getting-started/
+├── deployment.md
+└── azure-functions.md
+```
+
+**Estimated size:** ~4,574 Python LOC + 9 Bicep + ~5,200 doc lines + 3 workflows
+
+**Key design decisions:**
+- This repo has **zero Python runtime dependency on aos-kernel**. The deployment orchestrator is a standalone CLI tool.
+- Deployment workflows reference this repo's own Bicep templates and orchestrator.
+- The `deployment-error-fixer` and `azure-troubleshooting` skills move here since they are deployment-specific.
+- Deployment docs (`DEPLOYMENT_PLAN.md`, `DEPLOYMENT_TASKS.md`, `deployment.md`) consolidate here.
+
+---
+
+### 6. aos-intelligence
+
+**Purpose:** Machine learning pipelines, LoRA/LoRAx adapter management, DPO training, self-learning systems, knowledge management, and RAG engine.
+
+**Repository:** https://github.com/ASISaga/aos-intelligence
+
+**What moves here:**
+
+```
+src/AgentOperatingSystem/
+├── ml/                         # ML pipeline, DPO trainer, LoRAx, Foundry (3,159 LOC)
+│   ├── pipeline.py
+│   ├── pipeline_ops.py
+│   ├── dpo_trainer.py
+│   ├── lorax_server.py
+│   ├── foundry_agent_service.py
+│   └── self_learning_system.py
+├── learning/                   # Self-learning agents, knowledge, RAG (2,411 LOC)
+│   ├── self_learning_agents.py
+│   ├── self_learning_mixin.py
+│   ├── knowledge_manager.py
+│   ├── rag_engine.py
+│   ├── interaction_learner.py
+│   ├── domain_expert.py
+│   └── learning_pipeline.py
+├── knowledge/                  # Knowledge indexing, evidence, precedent (691 LOC)
+│   ├── indexing.py
+│   ├── evidence.py
+│   └── precedent.py
+├── platform/foundry/           # Foundry agent service integration (746 LOC combined)
+│   └── purpose_driven_foundry.py
+tests/
+├── test_lorax.py
+├── test_foundry_agent_service.py
+└── validate_foundry_integration.py
+examples/
+├── dpo_training_example.py
+├── foundry_agent_service_example.py
+└── lorax_multi_agent_example.py
+data/                           # Training data, learning metrics
+├── knowledge_*.json
+└── learning_*.json
+knowledge/                      # Domain knowledge bases
+├── agent_directives.json
+├── domain_contexts.json
+└── domain_knowledge.json
+config/
+└── self_learning_config.json
+```
+
+**Package name:** `aos-intelligence`  
+**Install:** `pip install aos-intelligence` (requires `aos-kernel` as dependency)
+
+**Estimated size:** ~6,261 Python LOC + 19 JSON data files
+
+**pyproject.toml dependencies:**
+```toml
+dependencies = [
+    "aos-kernel>=3.0.0",      # AOS kernel runtime
+]
+
+[project.optional-dependencies]
+ml = [
+    "transformers>=4.50.0",
+    "torch>=2.6.0",
+    "scikit-learn>=1.6.0",
+    "numpy>=2.0.0",
+    "pandas>=2.2.0",
+    "trl>=0.16.0",
+    "peft>=0.15.0",
+    "accelerate>=1.5.0",
+    "datasets>=3.5.0",
+    "mlflow>=3.5.0",
+]
+foundry = [
+    "azure-ai-agents>=1.1.0",
+    "azure-ai-projects>=1.0.0",
+]
+```
+
+**Key design decision — Interface boundary with aos-kernel:**
+- `purpose-driven-agent` defines `IMLService` interface in `ml_interface.py`
+- `aos-kernel` re-exports this interface in `services/service_interfaces.py`
+- `aos-intelligence` implements this interface and registers via plugin/extensibility framework
+- `agents/purpose_driven.py` calls ML operations through the interface, not direct imports
+- If `aos-intelligence` is not installed, ML operations gracefully degrade (already partially implemented with try/except patterns)
+
+---
+
+### 7. aos-dispatcher
+
+**Purpose:** Main Azure Functions entry point for the Agent Operating System. Exposes AOS as cloud services via Service Bus triggers and HTTP endpoints.
+
+**Repository:** https://github.com/ASISaga/aos-dispatcher
+
+**What moves here:**
+
+```
+function_app.py                 # Main Azure Functions entry point (332 LOC)
+host.json                       # Azure Functions host configuration
+local.settings.json             # Local dev settings (template)
+.github/
+├── skills/azure-functions/SKILL.md
+├── instructions/azure-functions.instructions.md
+├── prompts/azure-expert.md
+└── workflows/ci.yml
+docs/
+├── architecture.md
+├── azure-functions.md
+├── api-reference.md
+└── contributing.md
+tests/
+└── test_azure_functions_infrastructure.py
+pyproject.toml
+README.md
+LICENSE
+```
+
+**Package name:** `aos-dispatcher` (deployment target, not a library)
+
+**Dependencies:**
+```
+aos-kernel[azure]>=3.0.0
+aos-intelligence[foundry]>=1.0.0    # Optional, for ML-backed agents
+azure-functions>=1.21.0
+agent-framework>=1.0.0rc1
+agent-framework-orchestrations>=1.0.0b260219
+agent-framework-azurefunctions>=1.0.0b260219
+```
+
+**Key design decisions:**
+- This is a **deployment target**, not a library. It depends on `aos-kernel` and optionally `aos-intelligence`.
+- Contains only the root-level function app entry point (`function_app.py`) and its Azure Functions host config.
+- The `azure-functions` Copilot skill and related instructions/prompts are co-located here.
+- Independently deployable and scalable — changes to RealmOfAgents or MCPServers do not require redeploying this app.
+
+---
+
+### 8. aos-realm-of-agents
+
+**Purpose:** Config-driven agent deployment Azure Function app. Dynamically deploys and manages agents based on registry configuration.
+
+**Repository:** https://github.com/ASISaga/aos-realm-of-agents
+
+**What moves here:**
+
+```
+azure_functions/RealmOfAgents/
+├── function_app.py
+├── function_app_original.py
+├── agent_config_schema.py
+├── example_agent_registry.json
+├── host.json
+├── requirements.txt
+├── local.settings.json.example
+├── README.md
+└── MIGRATION_TO_FOUNDRY.md
+.github/
+├── workflows/ci.yml
+└── instructions/realm-of-agents.instructions.md
+docs/
+├── architecture.md
+├── RealmOfAgents.md
+├── api-reference.md
+└── contributing.md
+tests/
+└── test_realm_of_agents.py
+pyproject.toml
+LICENSE
+```
+
+**Package name:** `aos-realm-of-agents` (deployment target)
+
+**Dependencies:**
+```
+aos-kernel[azure]>=3.0.0
+azure-functions>=1.21.0
+agent-framework>=1.0.0rc1
+```
+
+**Key design decisions:**
+- Standalone function app with its own `host.json` and deployment configuration.
+- Config-driven: agents are defined via a JSON registry (`example_agent_registry.json`), not hard-coded.
+- Independently versioned and deployed — agent registry changes do not affect the main function app or MCPServers.
+
+---
+
+### 9. aos-mcp-servers
+
+**Purpose:** Config-driven MCP server deployment Azure Function app. Dynamically deploys and manages MCP servers based on registry configuration.
+
+**Repository:** https://github.com/ASISaga/aos-mcp-servers
+
+**What moves here:**
+
+```
+azure_functions/MCPServers/
+├── function_app.py
+├── mcp_server_schema.py
+├── example_mcp_server_registry.json
+├── host.json
+├── requirements.txt
+├── local.settings.json.example
+└── README.md
+.github/
+├── workflows/ci.yml
+└── instructions/mcp-servers.instructions.md
+docs/
+├── architecture.md
+├── mcp.md
+├── api-reference.md
+└── contributing.md
+tests/
+└── test_mcp_servers.py
+pyproject.toml
+LICENSE
+```
+
+**Package name:** `aos-mcp-servers` (deployment target)
+
+**Dependencies:**
+```
+aos-kernel[azure]>=3.0.0
+azure-functions>=1.21.0
+```
+
+**Key design decisions:**
+- Standalone function app with its own `host.json` and deployment configuration.
+- Config-driven: MCP servers are defined via a JSON registry, not hard-coded.
+- Independently versioned and deployed — MCP server changes do not affect the main function app or RealmOfAgents.
+
+---
+
+### 10. aos-client-sdk
+
+**Purpose:** Lightweight Python SDK for client applications to interact with the Agent Operating System as an infrastructure service. Client apps use this SDK to browse agents, compose orchestrations, and retrieve results — without managing agent lifecycles or infrastructure.
+
+**Repository:** https://github.com/ASISaga/aos-client-sdk
+
+**What moves here:**
+
+```
+src/aos_client/
+├── __init__.py
+├── client.py            # AOSClient — primary HTTP client
+└── models.py            # Pydantic models (AgentDescriptor, OrchestrationRequest, etc.)
+.github/
+└── workflows/ci.yml
+tests/
+├── test_client.py
+└── test_models.py
+examples/
+pyproject.toml
+README.md
+LICENSE
+```
+
+**Package name:** `aos-client-sdk` (`pip install aos-client-sdk[azure]`)
+
+**Dependencies:**
+```
+pydantic>=2.0.0
+aiohttp>=3.9.0
+azure-identity>=1.15.0       # Optional [azure], for Azure IAM auth
+azure-servicebus>=7.12.0     # Optional [azure], for Service Bus communication
+azure-functions>=1.21.0      # Optional [azure], for Functions scaffolding
+```
+
+**Key design decisions:**
+- **No AOS runtime dependencies** — the SDK depends only on `pydantic` and `aiohttp`. Client applications never need `aos-kernel`, `purpose-driven-agent`, or any agent package.
+- **`AOSApp` framework** — provides Azure Functions scaffolding via `@workflow` decorators.  Client apps define only business logic; the SDK generates HTTP triggers, Service Bus triggers, health endpoints, and auth middleware.
+- **Azure Service Bus communication** — bidirectional async messaging enables scale-to-zero for both AOS and client apps.  Both sides sleep and wake on Service Bus triggers.
+- **Azure IAM authentication** — built-in token validation and role-based access control.
+- **App registration** — `AOSRegistration` registers client apps with AOS, which provisions Service Bus queues/topics/subscriptions.
+- **Code deployment** — `AOSDeployer` deploys client apps to Azure Functions.
+- Communicates with AOS over HTTP (REST) and Azure Service Bus.
+- Provides both low-level methods (`submit_orchestration`, `get_orchestration_status`) and convenience helpers (`run_orchestration` — submit, poll, return result).
+- Models match the API contracts of `aos-dispatcher` (orchestration endpoints) and `aos-realm-of-agents` (agent catalog endpoints).
+
+---
+
+### 11. business-infinity
+
+**Purpose:** Example lean Azure Functions client application that demonstrates using AOS as an infrastructure service. Contains only business logic — all Azure Functions scaffolding, Service Bus communication, authentication, and deployment are handled by `aos-client-sdk`.
+
+**Repository:** https://github.com/ASISaga/business-infinity
+
+**What moves here:**
+
+```
+src/
+├── function_app.py                    # 7 lines — imports AOSApp, calls get_functions()
+└── business_infinity/
+    ├── __init__.py
+    └── workflows.py                   # @app.workflow decorators — pure business logic
+.github/
+└── workflows/ci.yml
+tests/
+└── test_workflows.py
+docs/
+pyproject.toml
+README.md
+LICENSE
+```
+
+**Package name:** `business-infinity` (deployment target)
+
+**Dependencies:**
+```
+aos-client-sdk[azure]>=2.0.0   # SDK + Azure Functions + Service Bus + Auth
+```
+
+**Key design decisions:**
+- **Zero boilerplate, zero agent code, zero infrastructure code.** BusinessInfinity's `function_app.py` is 7 lines — it imports the `AOSApp` with registered workflows and calls `get_functions()`.  All HTTP/Service Bus triggers, auth, and health endpoints are generated by the SDK.
+- Depends only on `aos-client-sdk[azure]` — never on `aos-kernel`, `purpose-driven-agent`, or any agent package.
+- Workflows use `@app.workflow` decorators that receive a `WorkflowRequest` with a ready-to-use `AOSClient`.
+- Selects C-suite agents (CEO, CFO, CMO, COO, CTO) from the RealmOfAgents catalog and composes orchestrations via AOS.
+- Serves as the **reference implementation** for any client application that wants to use AOS as an infrastructure service.
+
+---
+
+## Client Interaction Architecture
+
+The primary purpose of AOS is to provide **agent orchestrations as an infrastructure service** to client applications living in other Azure Functions apps (or any HTTP-capable application).
+
+### Separation of Concerns
+
+| Concern | Owner | Repository |
+|---------|-------|-----------|
+| Business logic (workflows, decisions, triggers) | Client app | `business-infinity` (example) |
+| Azure Functions scaffolding, triggers, auth middleware | Client SDK | `aos-client-sdk` (`AOSApp`) |
+| Agent catalog (available agents, capabilities) | RealmOfAgents | `aos-realm-of-agents` |
+| Orchestration API (submit, monitor, cancel, result) | AOS Function App | `aos-dispatcher` |
+| Service Bus async communication | Client SDK + AOS | `aos-client-sdk` + `aos-dispatcher` |
+| App registration & infrastructure provisioning | AOS Function App | `aos-dispatcher` |
+| Agent lifecycle, orchestration engine, messaging, storage | AOS Kernel | `aos-kernel` |
+| Authentication & access control (Azure IAM) | Client SDK | `aos-client-sdk` (`AOSAuth`) |
+| Code deployment | Client SDK | `aos-client-sdk` (`AOSDeployer`) |
+
+### Interaction Flow
+
+```
+1. Client app registers with AOS  (one-time setup)
+   → POST /api/apps/register  → aos-dispatcher
+   → AOS provisions Service Bus queue/topic/subscription
+   → Returns connection details to client
+
+2. Client app calls  client.list_agents()
+   → GET /api/realm/agents  → aos-realm-of-agents
+
+3. Client app submits orchestration (HTTP or Service Bus)
+   HTTP:  POST /api/orchestrations  → aos-dispatcher
+   Bus:   → aos-orchestration-requests queue  → aos-dispatcher wakes up
+   → aos-dispatcher dispatches to aos-kernel orchestration engine
+
+4. Client app polls (HTTP) or receives result (Service Bus)
+   HTTP:  GET /api/orchestrations/{id}  → aos-dispatcher
+   Bus:   ← aos-orchestration-results topic  → client app wakes up
+```
+
+### Scale-to-Zero Architecture
+
+Both AOS and client applications scale to zero and wake on demand:
+
+```
+┌─────────────────────┐                    ┌──────────────────────┐
+│  Client App (sleep)  │                    │  AOS Function App    │
+│  ┌────────────────┐  │   Service Bus      │  (sleep)             │
+│  │ @app.workflow   │──┼──── request ──────▶│  Service Bus trigger │
+│  │ decorators      │  │   queue            │  wakes up            │
+│  │                 │◀─┼──── result  ───────│                      │
+│  │ Service Bus     │  │   topic            │  Sends result back   │
+│  │ trigger wakes   │  │                    │  via topic           │
+│  └────────────────┘  │                    └──────────────────────┘
+└─────────────────────┘
+```
+
+### Dependency Principle
+
+Client applications depend **only** on `aos-client-sdk[azure]`. They never import `aos-kernel`, `purpose-driven-agent`, or any agent package. This ensures:
+
+- **Zero boilerplate** — the SDK handles all Azure Functions scaffolding
+- **Lean deployments** — client apps have minimal dependencies
+- **Clear boundaries** — business logic is cleanly separated from infrastructure
+- **Independent versioning** — client apps and AOS evolve independently
+- **Easy onboarding** — new client apps need only `pip install aos-client-sdk[azure]`
+- **Scale-to-zero** — both AOS and client apps sleep and wake on Service Bus triggers
+- **Secure by default** — Azure IAM authentication and RBAC built into the SDK
+
+---
+
+## Documentation Distribution
+
+With the removal of a dedicated `aos-docs` repository, documentation is **distributed** across all repositories. Each repo owns and maintains the documentation relevant to its domain.
+
+### Per-Repository docs/ Structure
+
+Every repository carries its own `docs/` directory with at minimum:
+
+- **`architecture.md`** — Module-specific architecture and design decisions
+- **`api-reference.md`** — Auto-generated or hand-written API documentation
+- **`contributing.md`** — Contribution guidelines specific to that repo
+
+### Distribution of Current Documentation
+
+| Documentation Category | Target Repository |
+|----------------------|-------------------|
+| Specification docs (`docs/specifications/auth.md`, `messaging.md`, `orchestration.md`, `mcp.md`, `reliability.md`, `storage.md`, `observability.md`, `governance.md`, `extensibility.md`) | **aos-kernel** (module specs live with the kernel) |
+| Specification docs (`docs/specifications/ml.md`, `learning.md`) | **aos-intelligence** |
+| Getting-started guides (`quickstart.md`, `installation.md`), overview docs (`vision.md`, `principles.md`, `perpetual-agents.md`, `services.md`) | **aos-kernel** (primary SDK entry point) |
+| Release docs (`CHANGELOG.md`, `RELEASE_NOTES.md`, `BREAKING_CHANGES.md`) | **aos-kernel** (per-repo changelogs encouraged) |
+| Architecture overview (`ARCHITECTURE.md`) | **aos-kernel** (system-level architecture) |
+| Deployment docs (`DEPLOYMENT_PLAN.md`, `DEPLOYMENT_TASKS.md`, `deployment.md`, `azure-functions.md`) | **aos-infrastructure** |
+| ML/Intelligence docs (`DPO_README.md`, `LORAX.md`, `self_learning.md`, `FOUNDRY_AGENT_SERVICE.md`) | **aos-intelligence** |
+| Azure Functions docs (`RealmOfAgents.md`, `IMPLEMENTATION_SUMMARY.md`) | Respective function app repos |
+| Agent-specific docs | Respective agent repos (`purpose-driven-agent`, `leadership-agent`, `cmo-agent`) |
+| Development guides (`CONTRIBUTING.md`, `MIGRATION.md`, `REFACTORING.md`) | **aos-kernel** (canonical), with repo-specific guides in each repo |
+
+### Documentation Site
+
+API reference is auto-generated from source code across all repos. A lightweight documentation aggregator (e.g., GitHub Pages on `aos-kernel` or a meta-repo) can pull and cross-link docs from all repos if a unified site is desired.
+
+---
+
+## Copilot Extensions Distribution
+
+With the removal of a dedicated `aos-copilot-extensions` repository, GitHub Copilot skills, prompts, and instructions are **distributed** to the repositories they specialize in. Each repo's `.github/` directory contains its own Copilot extensions.
+
+### Skills Distribution
+
+| Skill | Target Repository |
+|-------|-------------------|
+| `aos-architecture` | **aos-kernel** |
+| `async-python-testing` | **aos-kernel** |
+| `code-quality-pylint` | **aos-kernel** |
+| `code-refactoring` | **aos-kernel** |
+| `deployment-error-fixer` | **aos-infrastructure** |
+| `azure-troubleshooting` | **aos-infrastructure** |
+| `azure-functions` | **aos-dispatcher** |
+| `perpetual-agents` | **purpose-driven-agent** |
+| `leadership-agent` | **leadership-agent** |
+| `cmo-agent` | **cmo-agent** |
+
+### Prompts Distribution
+
+Prompts follow the same pattern — each prompt moves to the repo whose domain it covers:
+- `azure-expert.md` → **aos-dispatcher**
+- `code-quality-expert.md` → **aos-kernel**
+- `python-expert.md` → **aos-kernel**
+- `testing-expert.md` → **aos-kernel**
+- `deployment-expert.md` → **aos-infrastructure**
+
+### Instructions Distribution
+
+Instructions are distributed similarly:
+- `architecture.instructions.md`, `code-quality.instructions.md`, `development.instructions.md`, `python.instructions.md` → **aos-kernel**
+- `agents.instructions.md` → **purpose-driven-agent**
+- `documents.instructions.md` → **aos-kernel**
+- `azure-functions.instructions.md` → **aos-dispatcher**
+- `realm-of-agents.instructions.md` → **aos-realm-of-agents**
+- `mcp-servers.instructions.md` → **aos-mcp-servers**
+
+### Canonical Spec Reference
+
+`spec/skills.md` (the skills specification) moves to **aos-kernel** as the canonical reference for the Copilot skills format across all AOS repos.
+
+---
+
+## Dependency Graph
+
+```
+                    ┌──────────────────┐
+                    │  agent_framework  │  ← External (Microsoft Agent Framework)
+                    └────────┬─────────┘
+                             │
+          ┌──────────────────▼───────────────┐
+          │      purpose-driven-agent         │  ← Foundational agent base class
+          └──────────┬───────────────────────┘
+                     │
+           ┌─────────▼─────────┐
+           │ leadership-agent   │
+           └─────────┬─────────┘
+                     │
+           ┌─────────▼─────────┐
+           │    cmo-agent       │
+           └───────────────────┘
+
+          ┌──────────────────────────────────┐
+          │           aos-kernel              │  ← OS kernel (depends on purpose-driven-agent)
+          └────────────┬─────────────────────┘
+                       │
+         ┌─────────────┼───────────────────────────┐
+         ▼             ▼                            ▼
+┌─────────────────┐  ┌───────────────────┐   ┌──────────────────────┐
+│ aos-intelligence│  │  aos-dispatcher │   │ aos-realm-of-agents  │
+│  depends on:    │  │    depends on:    │   │    depends on:       │
+│  aos-kernel     │  │    aos-kernel     │   │    aos-kernel        │
+└─────────────────┘  │  aos-intelligence │   └──────────────────────┘
+                     │    (optional)     │
+                     └───────────────────┘   ┌──────────────────┐
+                                             │  aos-mcp-servers  │
+                                             │    depends on:    │
+                                             │    aos-kernel     │
+                                             └──────────────────┘
+
+          ┌──────────────────┐
+          │  aos-infrastructure   │  (standalone, no Python AOS deps)
+          └──────────────────┘
+```
+
+**Dependency rules:**
+1. `purpose-driven-agent` depends on `agent-framework>=1.0.0rc1` and nothing else in AOS.
+2. `leadership-agent` depends on `purpose-driven-agent>=1.0.0`.
+3. `cmo-agent` depends on `leadership-agent>=1.0.0`.
+4. `aos-kernel` depends on `purpose-driven-agent>=1.0.0` and no other AOS packages.
+5. `aos-intelligence` depends on `aos-kernel>=3.0.0` for interfaces and base classes.
+6. `aos-dispatcher` depends on `aos-kernel` (required) and `aos-intelligence` (optional).
+7. `aos-realm-of-agents` depends on `aos-kernel` (required).
+8. `aos-mcp-servers` depends on `aos-kernel` (required).
+9. `aos-infrastructure` is **standalone** — it deploys Azure infrastructure and has no Python dependency on AOS runtime.
+
+---
+
+## Shared Contracts & Interfaces
+
+### Interface Package in purpose-driven-agent
+
+The `ml_interface.py` module in `purpose-driven-agent` defines the canonical ML service boundary that decouples agents from the intelligence layer:
+
+```python
+# purpose-driven-agent: src/purpose_driven_agent/ml_interface.py
+
+class IMLService(ABC):
+    """Interface for ML pipeline operations — implemented by aos-intelligence."""
+    
+    @abstractmethod
+    async def trigger_lora_training(self, agent_role: str, params: Dict) -> str: ...
+    
+    @abstractmethod
+    async def run_ml_pipeline(self, pipeline_config: Dict) -> Dict: ...
+    
+    @abstractmethod
+    async def infer(self, model_id: str, prompt: str) -> Dict: ...
+
+class IKnowledgeService(ABC):
+    """Interface for knowledge management — implemented by aos-intelligence."""
+    
+    @abstractmethod
+    async def search(self, query: str, top_k: int = 5) -> List[Dict]: ...
+    
+    @abstractmethod
+    async def index_document(self, document: Dict) -> str: ...
+
+class ILearningService(ABC):
+    """Interface for self-learning — implemented by aos-intelligence."""
+    
+    @abstractmethod
+    async def learn_from_interaction(self, interaction: Dict) -> None: ...
+    
+    @abstractmethod
+    async def get_learning_metrics(self) -> Dict: ...
+```
+
+### Registration Pattern
+
+```python
+# aos-intelligence registers implementations at import time
+from aos_core.services import IMLService, register_service
+from aos_intelligence.ml.pipeline import MLPipelineManager
+
+register_service(IMLService, MLPipelineManager)
+```
+
+### Messaging Contracts
+
+The `messaging/contracts.py` module stays in `aos-kernel` as the canonical message format definition. All repos that send/receive messages import from `aos-kernel`.
+
+---
+
+## Migration Strategy (Completed)
+
+> **Note:** The migration described in this section has been completed. All repositories are live. This section is preserved as the historical record.
+
+### Phase 1: Prepare Boundaries ✅ Completed
+
+1. ML interfaces extracted: `IMLService`, `IKnowledgeService`, `ILearningService` defined in `purpose-driven-agent`'s `ml_interface.py`.
+2. Agents decoupled from ML: `purpose_driven.py` uses `PurposeDrivenAgent(_AgentFrameworkBase, ABC)` inheriting from `agent_framework.Agent`.
+3. Orchestration decoupled from ML via interface injection.
+4. Service registration via `services/registry.py`.
+
+### Phase 2: Create Target Repositories ✅ Completed
+
+All 15 repositories created on GitHub under the ASISaga organization.
+
+### Phase 3: Split Code ✅ Completed
+
+| Stream | Target Repo | Status |
+|--------|-------------|--------|
+| A0 | purpose-driven-agent | ✅ Live |
+| A1 | leadership-agent | ✅ Live |
+| A2 | cmo-agent | ✅ Live |
+| A3-A6 | ceo/cfo/cto/cso-agent | ✅ Live |
+| B | aos-kernel | ✅ Live |
+| C | aos-infrastructure | ✅ Live |
+| D | aos-intelligence | ✅ Live |
+| E | aos-dispatcher | ✅ Live |
+| F | aos-realm-of-agents | ✅ Live |
+| G | aos-mcp-servers | ✅ Live |
+| H | aos-client-sdk | ✅ Live |
+| I | business-infinity | ✅ Live |
+
+### Phase 4: Wire Dependencies ✅ Completed
+
+All packages published with correct dependency chains. Cross-repo CI triggers configured.
+
+### Phase 5: Meta-Repository ✅ Completed
+
+`AgentOperatingSystem` is now the meta-repository coordinating all 15 repos as Git submodules.
+
+---
+
+## Cross-Repository CI/CD
+
+### Per-Repository Workflows
+
+| Repository | Workflows |
+|-----------|-----------|
+| purpose-driven-agent | `ci.yml` (lint, test, build), `release.yml` (publish to PyPI) |
+| leadership-agent | `ci.yml` (lint, test against purpose-driven-agent), `release.yml` |
+| cmo-agent | `ci.yml` (lint, test against leadership-agent), `release.yml` |
+| aos-kernel | `ci.yml` (lint, test, build), `release.yml` (publish to PyPI) |
+| aos-infrastructure | `infrastructure-deploy.yml`, `infrastructure-monitoring.yml`, `infrastructure-troubleshooting.yml` |
+| aos-intelligence | `ci.yml` (lint, test against aos-kernel), `release.yml` |
+| aos-dispatcher | `ci.yml` (build, test, deploy main function app) |
+| aos-realm-of-agents | `ci.yml` (build, test, deploy RealmOfAgents function app) |
+| aos-mcp-servers | `ci.yml` (build, test, deploy MCPServers function app) |
+
+### Cross-Repository Triggers
+
+```yaml
+# In leadership-agent CI:
+on:
+  workflow_dispatch:
+  push:
+  repository_dispatch:
+    types: [purpose-driven-agent-released]  # Triggered when purpose-driven-agent publishes
+
+# In aos-intelligence CI:
+on:
+  workflow_dispatch:
+  push:
+  repository_dispatch:
+    types: [aos-kernel-released]  # Triggered when aos-kernel publishes new version
+```
+
+### Dependency Version Matrix
+
+| Package | Consumed By |
+|---------|------------|
+| `purpose-driven-agent>=1.0.0` | leadership-agent, cmo-agent, aos-kernel |
+| `leadership-agent>=1.0.0` | cmo-agent |
+| `aos-kernel>=3.0.0` | aos-intelligence, aos-dispatcher, aos-realm-of-agents, aos-mcp-servers |
+| `aos-intelligence>=1.0.0` | aos-dispatcher (optional) |
+| `agent-framework>=1.0.0rc1` | purpose-driven-agent, aos-kernel, aos-dispatcher, aos-realm-of-agents |
+| `agent-framework-orchestrations>=1.0.0b260219` | aos-kernel, aos-dispatcher |
+
+---
+
+## Risks & Mitigations
+
+### Risk 1: Breaking Cross-Module Imports
+
+**Impact:** High  
+**Likelihood:** High  
+**Mitigation:**
+- Phase 1 (prepare boundaries) must be completed and all tests passing before any split.
+- The `agents → ml` and `orchestration → ml` couplings are the primary risk. Define interfaces first.
+- Use a compatibility shim package initially if needed.
+
+### Risk 2: Increased Development Friction
+
+**Impact:** Medium  
+**Likelihood:** Medium  
+**Mitigation:**
+- Use a monorepo development workflow (e.g., `pip install -e ../purpose-driven-agent`) for local development across repos.
+- Provide a `docker-compose.yml` or `Makefile` in a meta-repo for full-stack local setup.
+- Keep dependency version ranges wide enough that not every kernel change requires intelligence/functions updates.
+
+### Risk 3: Documentation Staleness
+
+**Impact:** Medium  
+**Likelihood:** Medium  
+**Mitigation:**
+- Auto-generate API reference from source code in `purpose-driven-agent`, agent repos, `aos-kernel`, and `aos-intelligence`.
+- Use a docs CI pipeline that builds and validates cross-references.
+- Documentation co-located with code in each repo's `docs/` directory improves maintainability and reduces staleness.
+
+### Risk 4: History Fragmentation
+
+**Impact:** Low  
+**Likelihood:** High  
+**Mitigation:**
+- Use `git filter-branch` to preserve relevant commit history in each target repo.
+- Keep the original repo archived as a historical reference.
+- Document the split in CHANGELOG entries in all repos.
+
+### Risk 5: CI/CD Complexity
+
+**Impact:** Medium  
+**Likelihood:** Medium  
+**Mitigation:**
+- Use GitHub Actions `repository_dispatch` for cross-repo CI triggers.
+- Pin dependency versions in CI matrices.
+- Create a weekly integration test that installs all packages together and runs end-to-end tests.
+
+---
+
+## Decision Log
+
+| # | Decision | Rationale | Date |
+|---|----------|-----------|------|
+| 1 | Split into 11 repos | Natural domain boundaries; different release cadences and audiences; each function app independently deployable; client SDK and example app enable infrastructure-as-a-service pattern | Feb 2026 |
+| 2 | `aos-infrastructure` has no Python dependency on `aos-kernel` | Deployment orchestrator is standalone CLI; no runtime coupling needed | Feb 2026 |
+| 3 | ML/Intelligence in separate repo from kernel | Heavy dependencies (PyTorch, transformers), different release cadence, different team expertise | Feb 2026 |
+| 4 | Distribute Copilot extensions to owning repos | Skills, prompts, and instructions are more effective when co-located with the code they describe | Feb 2026 |
+| 5 | Interface-based decoupling over direct imports | Enables optional installation of intelligence; follows dependency inversion principle | Feb 2026 |
+| 6 | Phase 1 (prepare boundaries) before any split | Reduces risk of broken imports; validates architecture in safe monorepo environment | Feb 2026 |
+| 7 | Preserve git history via filter-branch | Maintains traceability; important for audit and compliance | Feb 2026 |
+| 8 | Distribute docs to owning repos | Documentation co-located with code improves maintainability; each repo owns its docs | Feb 2026 |
+| 9 | Each agent in its own dedicated repository | Agents have distinct purposes, audiences, and versioning; each can be consumed independently; clean inheritance hierarchy expressed as package dependencies | Feb 2026 |
+| 10 | Rename `aos-core` to `aos-kernel` | "Kernel" better describes the role: the orchestration engine, messaging bus, and system services that form the OS foundation; distinguishes clearly from `purpose-driven-agent` which is the agent foundation | Feb 2026 |
+| 11 | `PurposeDrivenAgent` inherits from `agent_framework.Agent` | Establishes the canonical class hierarchy on top of the Microsoft Agent Framework runtime; graceful fallback stub preserves behaviour when package is not installed | Feb 2026 |
+| 12 | Agent repo scaffolding prepared in `docs/agent-repositories/` | Provided immediately usable scaffolding for the split without requiring a separate meta-repository; each folder was a complete, self-sufficient repository that has since been published to GitHub | Feb 2026 |
+| 13 | Split `aos-azure-functions` into 3 repos | Each function app has its own deployment lifecycle, scaling requirements, and team ownership; independently versioned and deployed | Feb 2026 |
+| 14 | Remove dedicated `aos-docs` repo | Documentation co-located with code improves maintainability; each repo owns its docs | Feb 2026 |
+| 15 | Remove dedicated `aos-copilot-extensions` repo | Copilot skills, prompts, and instructions are more effective when co-located with the code they describe | Feb 2026 |
+| 16 | Add `aos-client-sdk` repo | Client applications need a lightweight SDK to interact with AOS as an infrastructure service without depending on agent or kernel packages; enables the lean-client architecture | Feb 2026 |
+| 17 | Add `business-infinity` repo | Reference implementation of a lean client app that uses AOS via `aos-client-sdk`; demonstrates the C-suite orchestration use case with zero agent/infrastructure code | Feb 2026 |
+| 18 | AOS as infrastructure service | The primary purpose of AOS is to provide agent orchestrations as an infrastructure service; client apps select agents from RealmOfAgents and compose orchestrations via the client SDK | Feb 2026 |
+| 19 | SDK v2.0 — `AOSApp` framework with `@workflow` decorators | Client apps define only business logic via decorators; SDK generates all Azure Functions scaffolding (HTTP triggers, Service Bus triggers, health, auth).  BusinessInfinity's `function_app.py` reduced from 154 to 7 lines. | Feb 2026 |
+| 20 | Azure Service Bus async communication | Bidirectional message-based communication enables scale-to-zero for both AOS and client apps.  AOS wakes on Service Bus trigger to process orchestration requests; client apps wake to receive results. | Feb 2026 |
+| 21 | Azure IAM authentication in SDK | `AOSAuth` provides token validation and role-based access control.  Auth middleware is built into `AOSApp` so client apps don't implement security manually. | Feb 2026 |
+| 22 | App registration and infrastructure provisioning | `AOSRegistration` registers client apps with AOS (`POST /api/apps/register`).  AOS provisions Service Bus queues, topics, subscriptions, and managed identity role assignments. | Feb 2026 |
+| 23 | Code deployment in SDK | `AOSDeployer` handles packaging and deployment to Azure Functions, including `host.json` and `local.settings.json` generation. | Feb 2026 |
+
+---
+
+## Appendix: File Count Summary by Target Repository
+
+| Target Repository | Python Files | Markdown Files | Other Files | Estimated Total |
+|------------------|-------------|----------------|-------------|-----------------|
+| purpose-driven-agent | ~4 | ~5 | pyproject.toml, LICENSE | ~10 |
+| leadership-agent | ~2 | ~5 | pyproject.toml, LICENSE | ~8 |
+| cmo-agent | ~2 | ~5 | pyproject.toml, LICENSE | ~8 |
+| aos-kernel | ~111 | ~30 | pyproject.toml | ~141 |
+| aos-infrastructure | ~27 | ~20 | 12 Bicep/param, 3 YAML | ~62 |
+| aos-intelligence | ~20 | ~10 | 19 JSON | ~49 |
+| aos-dispatcher | ~2 | ~8 | host.json, 1 YAML | ~12 |
+| aos-realm-of-agents | ~4 | ~6 | 2 JSON, host.json | ~13 |
+| aos-mcp-servers | ~3 | ~5 | 2 JSON, host.json | ~11 |
+| aos-client-sdk | ~8 | ~2 | pyproject.toml, LICENSE | ~11 |
+| business-infinity | ~3 | ~2 | pyproject.toml, LICENSE | ~6 |
+| **Total** | **~181** | **~98** | **~47** | **~326** |
+
+> Note: Some files appear in multiple counts due to shared ownership (e.g., docs that reference deployment).
+> The current monorepo has ~198 Python + ~117 MD + ~40 other = ~355 files.
+> Documentation and Copilot extensions are distributed across repos, increasing per-repo file counts but eliminating the dedicated aos-docs and aos-copilot-extensions repos.
+
+---
+
+## Completion Summary
+
+The repository split is **complete** as of March 2026. All 15 repositories are live:
+
+| Repository | GitHub URL | Status |
+|-----------|-----------|--------|
+| purpose-driven-agent | https://github.com/ASISaga/purpose-driven-agent | ✅ Live |
+| leadership-agent | https://github.com/ASISaga/leadership-agent | ✅ Live |
+| ceo-agent | https://github.com/ASISaga/ceo-agent | ✅ Live |
+| cfo-agent | https://github.com/ASISaga/cfo-agent | ✅ Live |
+| cto-agent | https://github.com/ASISaga/cto-agent | ✅ Live |
+| cso-agent | https://github.com/ASISaga/cso-agent | ✅ Live |
+| cmo-agent | https://github.com/ASISaga/cmo-agent | ✅ Live |
+| aos-kernel | https://github.com/ASISaga/aos-kernel | ✅ Live |
+| aos-intelligence | https://github.com/ASISaga/aos-intelligence | ✅ Live |
+| aos-infrastructure | https://github.com/ASISaga/aos-infrastructure | ✅ Live |
+| aos-dispatcher | https://github.com/ASISaga/aos-dispatcher | ✅ Live |
+| aos-realm-of-agents | https://github.com/ASISaga/aos-realm-of-agents | ✅ Live |
+| aos-mcp-servers | https://github.com/ASISaga/aos-mcp-servers | ✅ Live |
+| aos-client-sdk | https://github.com/ASISaga/aos-client-sdk | ✅ Live |
+| business-infinity | https://github.com/ASISaga/business-infinity | ✅ Live |
