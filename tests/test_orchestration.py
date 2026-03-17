@@ -146,3 +146,46 @@ class TestFoundryOrchestrationEngine:
         await engine.run_agent_turn(oid, "cfo", "Budget?")
         status = await engine.get_status(oid)
         assert len(status["turns"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_get_thread_messages(self):
+        engine = FoundryOrchestrationEngine()
+        orch = await engine.create_orchestration(["ceo", "cfo"], "Review")
+        oid = orch["orchestration_id"]
+        await engine.run_agent_turn(oid, "ceo", "Strategy?")
+        await engine.run_agent_turn(oid, "cfo", "Budget?")
+        messages = await engine.get_thread_messages(oid)
+        assert len(messages) == 2
+        assert messages[0]["content"] == "Strategy?"
+        assert messages[1]["content"] == "Budget?"
+
+    @pytest.mark.asyncio
+    async def test_get_thread_messages_not_found(self):
+        engine = FoundryOrchestrationEngine()
+        with pytest.raises(KeyError, match="not found"):
+            await engine.get_thread_messages("bad-id")
+
+    @pytest.mark.asyncio
+    async def test_delete_thread(self):
+        engine = FoundryOrchestrationEngine()
+        orch = await engine.create_orchestration(["ceo"], "Review")
+        oid = orch["orchestration_id"]
+        await engine.delete_thread(oid)
+        with pytest.raises(KeyError, match="not found"):
+            await engine.get_status(oid)
+
+    @pytest.mark.asyncio
+    async def test_delete_thread_not_found(self):
+        engine = FoundryOrchestrationEngine()
+        with pytest.raises(KeyError, match="not found"):
+            await engine.delete_thread("bad-id")
+
+    @pytest.mark.asyncio
+    async def test_create_orchestration_with_metadata(self):
+        engine = FoundryOrchestrationEngine()
+        orch = await engine.create_orchestration(
+            agent_ids=["ceo"],
+            purpose="Review",
+            metadata={"project": "quarterly"},
+        )
+        assert orch["metadata"]["project"] == "quarterly"

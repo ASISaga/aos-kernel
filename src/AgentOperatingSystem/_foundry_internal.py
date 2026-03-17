@@ -1,8 +1,8 @@
 """Internal Foundry integration helpers.
 
-These functions create Foundry service instances from the SDK's internal
-modules.  They are separated so that the kernel can operate without the
-SDK installed (e.g. in unit tests).
+These functions create Foundry Agent Service connections from the
+``azure-ai-projects`` SDK.  They are separated so that the kernel can
+operate without the SDK installed (e.g. in unit tests).
 """
 
 from __future__ import annotations
@@ -10,19 +10,32 @@ from __future__ import annotations
 from typing import Any, Optional
 
 
-def _create_foundry_service(
-    project_client: Any,
-    gateway_url: Optional[str] = None,
+def _create_project_client(
+    endpoint: str,
+    credential: Optional[Any] = None,
 ) -> Any:
-    """Create a ``FoundryAgentService`` from the SDK's internal module.
+    """Create an ``AIProjectClient`` connected to a Foundry project.
+
+    :param endpoint: The Azure AI Foundry project endpoint URL.
+    :param credential: An Azure credential instance.  When ``None``,
+        ``DefaultAzureCredential`` is used.
+    :returns: An ``AIProjectClient`` instance.
+    """
+    from azure.ai.projects import AIProjectClient
+    from azure.identity import DefaultAzureCredential
+
+    cred = credential or DefaultAzureCredential()
+    return AIProjectClient(endpoint=endpoint, credential=cred)
+
+
+def _get_agents_client(project_client: Any) -> Any:
+    """Obtain the ``AgentsClient`` from an ``AIProjectClient``.
+
+    The ``AgentsClient`` provides direct access to Foundry Agent Service
+    operations: agent CRUD, thread management, message posting, and run
+    lifecycle.
 
     :param project_client: An ``AIProjectClient`` instance.
-    :param gateway_url: Optional AI Gateway URL.
-    :returns: A ``FoundryAgentService`` instance.
+    :returns: An ``AgentsClient`` instance.
     """
-    from aos_client.foundry import FoundryAgentService
-
-    return FoundryAgentService(
-        project_client=project_client,
-        gateway_url=gateway_url,
-    )
+    return project_client.agents

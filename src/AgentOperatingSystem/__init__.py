@@ -1,6 +1,7 @@
 """AOS Kernel — Agent Operating System Kernel.
 
-All orchestration is managed exclusively by the Foundry Agent Service.
+All orchestration is managed natively through the Foundry Agent Service
+(``azure-ai-projects`` / ``azure-ai-agents`` SDK).
 
 Core components:
 
@@ -17,7 +18,7 @@ Multi-LoRA components (from ``aos-intelligence``):
 - :class:`~aos_intelligence.ml.LoRAOrchestrationRouter`
 """
 
-__version__ = "5.0.0"
+__version__ = "6.0.0"
 
 from AgentOperatingSystem.agent_operating_system import AgentOperatingSystem
 from AgentOperatingSystem.config import KernelConfig
