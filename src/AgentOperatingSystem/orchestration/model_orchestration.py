@@ -2,7 +2,7 @@
 Model Orchestration for AOS
 
 Enhanced model orchestration system integrated from SelfLearningAgent.
-Provides comprehensive model management, Azure ML integration, and semantic kernel support.
+Provides comprehensive model management, Azure ML integration, and Foundry Agent Service support.
 """
 
 import asyncio
@@ -25,20 +25,12 @@ try:
 except ImportError:
     AZURE_ML_AVAILABLE = False
 
-# Optional Agent Framework imports
-try:
-    from agent_framework import Agent, WorkflowBuilder
-    AGENT_FRAMEWORK_AVAILABLE = True
-except ImportError:
-    AGENT_FRAMEWORK_AVAILABLE = False
-
 
 class ModelType(Enum):
     """Different model types supported by the orchestrator"""
     VLLM = "vllm"
     AZURE_ML = "azure_ml"
     OPENAI = "openai"
-    AGENT_FRAMEWORK = "agent_framework"
     LOCAL_MODEL = "local_model"
     FOUNDRY_AGENT_SERVICE = "foundry_agent_service"
 
@@ -73,9 +65,6 @@ class ModelOrchestrator:
             "api_key": os.getenv("VLLM_API_KEY"),
             "timeout": 30
         }
-
-        # Agent Framework client (renamed from ChatAgent to Agent in 1.0.0rc1)
-        self.agent_framework_client: Optional['Agent'] = None
 
         # Azure Foundry Agent Service configuration
         self.foundry_agent_service_config = {
@@ -122,10 +111,6 @@ class ModelOrchestrator:
             # Initialize Azure ML if available
             if AZURE_ML_AVAILABLE and self.azure_ml_config["subscription_id"]:
                 await self._initialize_azure_ml()
-
-            # Initialize Agent Framework if available (replaces Semantic Kernel)
-            if AGENT_FRAMEWORK_AVAILABLE:
-                await self._initialize_agent_framework()
 
             # Perform initial health check
             await self._perform_health_check()
@@ -186,26 +171,6 @@ class ModelOrchestrator:
             self.logger.error(f"Failed to initialize Azure ML: {e}")
             self.azure_ml_client = None
 
-    async def _initialize_agent_framework(self) -> None:
-        """Initialize Agent Framework"""
-
-        try:
-            # Create an Agent for model orchestration
-            # Note: In production, use a real chat client instead of Mock
-            from unittest.mock import Mock
-            mock_client = Mock()
-
-            self.agent_framework_client = Agent(
-                client=mock_client,
-                instructions="You are a model orchestration agent responsible for managing AI model requests.",
-                name="ModelOrchestrator"
-            )
-            self.logger.info("Agent Framework initialized")
-
-        except Exception as e:
-            self.logger.error(f"Failed to initialize Agent Framework: {e}")
-            self.agent_framework_client = None
-
     async def process_model_request(self, model_type: ModelType, domain: str,
                                   user_input: str, conversation_id: str,
                                   **kwargs) -> Dict[str, Any]:
@@ -219,8 +184,6 @@ class ModelOrchestrator:
                 result = await self._handle_vllm_request(domain, user_input, conversation_id, **kwargs)
             elif model_type == ModelType.AZURE_ML:
                 result = await self._handle_azure_ml_request(domain, user_input, conversation_id, **kwargs)
-            elif model_type == ModelType.AGENT_FRAMEWORK:
-                result = await self._handle_agent_framework_request(domain, user_input, conversation_id, **kwargs)
             elif model_type == ModelType.OPENAI:
                 result = await self._handle_openai_request(domain, user_input, conversation_id, **kwargs)
             elif model_type == ModelType.FOUNDRY_AGENT_SERVICE:
@@ -313,35 +276,6 @@ class ModelOrchestrator:
 
         except Exception as e:
             self.logger.error(f"Azure ML request failed: {e}")
-            raise
-
-    async def _handle_agent_framework_request(self, domain: str, user_input: str,
-                                            conversation_id: str, **kwargs) -> Dict[str, Any]:
-        """Handle Agent Framework request"""
-
-        if not self.agent_framework_client:
-            raise ValueError("Agent Framework not initialized")
-
-        try:
-            # Use Agent Framework for processing
-            # Format input for the agent
-            formatted_input = f"Domain: {domain}\nRequest: {user_input}"
-
-            # Process through Agent Framework
-            # Note: This is a simplified implementation
-            # In practice, you would use the agent's complete() method or similar
-            response = f"Processed by Agent Framework - Domain: {domain}, Input: {user_input}"
-
-            return {
-                "conversationId": conversation_id,
-                "domain": domain,
-                "reply": response,
-                "success": True,
-                "source": "agent_framework"
-            }
-
-        except Exception as e:
-            self.logger.error(f"Agent Framework request failed: {e}")
             raise
 
     async def _handle_openai_request(self, domain: str, user_input: str,
@@ -536,7 +470,7 @@ class ModelOrchestrator:
 
         # Simple model selection logic (can be enhanced with ML)
         model_preferences = {
-            "leadership": [ModelType.FOUNDRY_AGENT_SERVICE, ModelType.AGENT_FRAMEWORK, ModelType.VLLM, ModelType.AZURE_ML],
+            "leadership": [ModelType.FOUNDRY_AGENT_SERVICE, ModelType.VLLM, ModelType.AZURE_ML],
             "sales": [ModelType.FOUNDRY_AGENT_SERVICE, ModelType.AZURE_ML, ModelType.VLLM, ModelType.OPENAI],
             "erp": [ModelType.FOUNDRY_AGENT_SERVICE, ModelType.AZURE_ML, ModelType.VLLM],
             "general": [ModelType.FOUNDRY_AGENT_SERVICE, ModelType.VLLM, ModelType.OPENAI, ModelType.AZURE_ML]
@@ -561,8 +495,6 @@ class ModelOrchestrator:
             return bool(self.vllm_config["server_url"])
         elif model_type == ModelType.AZURE_ML:
             return bool(self.azure_ml_config["endpoint_url"])
-        elif model_type == ModelType.AGENT_FRAMEWORK:
-            return self.agent_framework_client is not None
         elif model_type == ModelType.OPENAI:
             return bool(os.getenv("OPENAI_API_KEY"))
         elif model_type == ModelType.FOUNDRY_AGENT_SERVICE:
@@ -643,10 +575,10 @@ class ModelOrchestrator:
                 "note": "Health check requires actual endpoint test"
             }
 
-        # Check Agent Framework
-        if self.agent_framework_client:
-            health_results[ModelType.AGENT_FRAMEWORK.value] = {
-                "status": "initialized",
+        # Check Foundry Agent Service
+        if self.foundry_agent_service_config["endpoint_url"]:
+            health_results[ModelType.FOUNDRY_AGENT_SERVICE.value] = {
+                "status": "configured",
                 "last_check": datetime.utcnow().isoformat()
             }
 
@@ -696,7 +628,7 @@ class ModelOrchestrator:
         """Get service availability status"""
         return {
             "azure_ml": AZURE_ML_AVAILABLE,
-            "agent_framework": AGENT_FRAMEWORK_AVAILABLE,
+            "foundry_agent_service": bool(self.foundry_agent_service_config["endpoint_url"]),
             "vllm_configured": bool(self.vllm_config["server_url"]),
             "azure_ml_configured": bool(self.azure_ml_config["endpoint_url"])
         }
@@ -711,7 +643,7 @@ class ModelOrchestrator:
             "request_metrics": self.request_metrics,
             "service_availability": {
                 "azure_ml": AZURE_ML_AVAILABLE,
-                "agent_framework": AGENT_FRAMEWORK_AVAILABLE,
+                "foundry_agent_service": bool(self.foundry_agent_service_config["endpoint_url"]),
                 "vllm_configured": bool(self.vllm_config["server_url"]),
                 "azure_ml_configured": bool(self.azure_ml_config["endpoint_url"])
             },

@@ -35,8 +35,9 @@ Deployment:
   deployment orchestrator (deployment/deploy.py).  Derived-agent GitHub workflows
   call this method to deploy their agent to Azure.
 
-agent_framework.Agent (Microsoft Agent Framework >= 1.0.0rc1) is a MANDATORY runtime
-dependency.  PurposeDrivenAgent directly inherits from it.
+This version is Foundry Agent Service native — agent operations (CRUD, threads,
+runs) are performed via the azure-ai-projects/azure-ai-agents SDK through the
+FoundryAgentManager and FoundryOrchestrationEngine in aos-kernel.
 """
 
 import subprocess
@@ -47,12 +48,11 @@ from datetime import datetime
 import logging
 import asyncio
 import uuid
-from agent_framework import Agent
-from ..ml.pipeline_ops import trigger_lora_training, run_azure_ml_pipeline, aml_infer
+from aos_intelligence.ml.pipeline_ops import trigger_lora_training, run_azure_ml_pipeline, aml_infer
 from ..mcp.context_server import ContextMCPServer
 
 
-class PurposeDrivenAgent(Agent):
+class PurposeDrivenAgent:
     """
     Purpose-Driven Perpetual Agent — The fundamental building block of AOS.
 
@@ -67,6 +67,8 @@ class PurposeDrivenAgent(Agent):
       domain context dict, and a list of skill names.
     - **Perpetual**: Runs indefinitely, awakening on events.
     - **Stateful**: Maintains context across all interactions via MCP.
+    - **Foundry-native**: Agent operations (CRUD, threads, runs) are performed via
+      the azure-ai-projects/azure-ai-agents SDK through FoundryAgentManager.
     - **Deployable**: Provides deploy() to push itself to Azure via the Python
       deployment orchestrator. Derived-agent GitHub workflows call this method.
 
@@ -133,20 +135,12 @@ class PurposeDrivenAgent(Agent):
               its LoRA adapter (vocabulary, persona, knowledge), domain context,
               and skill names.
             - MCP (via ContextMCPServer) provides context management and domain tools.
+            - Agent operations are Foundry-native via azure-ai-projects SDK.
         """
-        # Initialise agent_framework.Agent (mandatory runtime dependency).
-        # client=None defers LLM client wiring to the AOS runtime layer.
-        # instructions receives the combined system message + purpose statement
-        # so the agent's purpose is visible to the LLM from the start.
-        super().__init__(
-            client=None,
-            name=name or agent_id,
-            instructions=system_message or purpose,
-        )
-
         # BaseAgent attributes
         self.agent_id = agent_id
         self.name = name or agent_id
+        self.instructions = system_message or purpose
         self.role = role or "agent"
         self.agent_type = agent_type or "purpose_driven"
         self.config = config or {}

@@ -9,6 +9,11 @@ Azure AI Foundry Agent Service.  It handles:
 * Maintaining a bidirectional mapping between local agent IDs and Foundry
   agent IDs.
 * Purpose alignment when orchestration context changes.
+
+Also exports:
+
+* :class:`PurposeDrivenAgent` — the fundamental agent building block
+* :class:`GenericPurposeDrivenAgent` — alias for PurposeDrivenAgent
 """
 
 from __future__ import annotations
@@ -17,6 +22,9 @@ import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+
+# Re-export from purpose_driven module
+from .purpose_driven import PurposeDrivenAgent, GenericPurposeDrivenAgent
 
 logger = logging.getLogger(__name__)
 
