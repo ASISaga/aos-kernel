@@ -72,14 +72,17 @@ class AgentOperatingSystem:
         self.agent_manager = FoundryAgentManager(
             project_client=project_client,
             default_model=self.config.default_model,
+            subconscious_mcp_url=self.config.subconscious_mcp_url,
         )
         self.orchestration_engine = FoundryOrchestrationEngine(
             project_client=project_client,
             agent_manager=self.agent_manager,
+            subconscious_mcp_url=self.config.subconscious_mcp_url,
         )
         self.message_bridge = FoundryMessageBridge(
             agent_manager=self.agent_manager,
             orchestration_engine=self.orchestration_engine,
+            subconscious_mcp_url=self.config.subconscious_mcp_url,
         )
 
         # Multi-LoRA subsystems
@@ -246,6 +249,19 @@ class AgentOperatingSystem:
     async def get_thread_messages(self, orchestration_id: str) -> List[Dict[str, Any]]:
         """Retrieve all messages from the orchestration's Foundry thread."""
         return await self.orchestration_engine.get_thread_messages(orchestration_id)
+
+    async def get_conversation_from_subconscious(
+        self, orchestration_id: str
+    ) -> List[Dict[str, Any]]:
+        """Retrieve persisted conversation history from the subconscious MCP server.
+
+        Returns an empty list when the subconscious URL is not configured or
+        the call fails.
+
+        :param orchestration_id: Target orchestration.
+        :returns: List of persisted message records, oldest first.
+        """
+        return await self.message_bridge.get_conversation_from_subconscious(orchestration_id)
 
     async def stop_orchestration(self, orchestration_id: str) -> None:
         """Stop an orchestration."""
@@ -429,4 +445,5 @@ class AgentOperatingSystem:
             "active_orchestrations": self.orchestration_engine.orchestration_count,
             "messages_bridged": self.message_bridge.message_count,
             "lora_adapters_registered": self.lora_registry.adapter_count,
+            "subconscious_connected": bool(self.config.subconscious_mcp_url),
         }

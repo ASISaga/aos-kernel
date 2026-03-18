@@ -36,6 +36,7 @@ FOUNDRY_TOOL_TYPES = frozenset({
     "azure_ai_search",
     "openapi",
     "function",
+    "mcp",
 })
 
 
@@ -52,11 +53,33 @@ class FoundryAgentManager:
         self,
         project_client: Any = None,
         default_model: str = "gpt-4o",
+        subconscious_mcp_url: str = "",
     ) -> None:
         self.project_client = project_client
         self.default_model = default_model
+        self.subconscious_mcp_url = subconscious_mcp_url
         # local_agent_id → foundry registration record
         self._registered: Dict[str, Dict[str, Any]] = {}
+
+    # ------------------------------------------------------------------
+    # MCP helpers
+    # ------------------------------------------------------------------
+
+    def _subconscious_mcp_tool(self) -> Dict[str, Any]:
+        """Return the Foundry MCP tool definition for the subconscious server.
+
+        The subconscious MCP server is enrolled as a persistent-memory tool
+        for every agent so that all conversation turns can be stored and
+        retrieved across orchestration sessions.
+
+        :returns: Foundry MCP tool definition dict.
+        """
+        return {
+            "type": "mcp",
+            "server_label": "subconscious",
+            "server_url": f"{self.subconscious_mcp_url.rstrip('/')}/sse",
+            "allowed_tools": [],
+        }
 
     # ------------------------------------------------------------------
     # Registration
@@ -108,6 +131,24 @@ class FoundryAgentManager:
         if adapter_name:
             instructions = f"[Adapter: {adapter_name}] {purpose}"
 
+        # Merge caller-provided tools with the subconscious MCP tool (if configured)
+        effective_tools: List[dict] = list(tools) if tools else []
+        if self.subconscious_mcp_url:
+            subconscious_tool = self._subconscious_mcp_tool()
+            # Only add if no subconscious tool is already present (caller may pre-configure it)
+            if not any(
+                t.get("server_label") == "subconscious"
+                for t in effective_tools
+                if isinstance(t, dict)
+            ):
+                effective_tools.append(subconscious_tool)
+            logger.debug(
+                "Auto-enrolled subconscious MCP tool for agent %s (url=%s)",
+                agent_id,
+                self.subconscious_mcp_url,
+            )
+        tools_to_register = effective_tools or None
+
         # Create agent in Foundry Agent Service if project client is available
         if self.project_client is not None:
             try:
@@ -116,8 +157,8 @@ class FoundryAgentManager:
                     "name": name or agent_id,
                     "instructions": instructions,
                 }
-                if tools:
-                    kwargs["tools"] = tools
+                if tools_to_register:
+                    kwargs["tools"] = tools_to_register
                 if tool_resources:
                     kwargs["tool_resources"] = tool_resources
                 if temperature is not None:
@@ -146,7 +187,7 @@ class FoundryAgentManager:
             "adapter_name": adapter_name,
             "capabilities": capabilities or [],
             "model": model_name,
-            "tools": tools or [],
+            "tools": effective_tools,
             "tool_resources": tool_resources or {},
             "temperature": temperature,
             "top_p": top_p,

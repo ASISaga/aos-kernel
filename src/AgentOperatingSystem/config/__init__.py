@@ -67,6 +67,10 @@ class KernelConfig(BaseModel):
         default_factory=lambda: os.environ.get("ENVIRONMENT", "dev"),
         description="Deployment environment",
     )
+    subconscious_mcp_url: str = Field(
+        default_factory=lambda: os.environ.get("SUBCONSCIOUS_MCP_URL", ""),
+        description="URL of the subconscious MCP server for conversation persistence (https://subconscious.asisaga.com)",
+    )
 
     @classmethod
     def from_env(cls) -> "KernelConfig":
