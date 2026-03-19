@@ -33,9 +33,11 @@ class FoundryOrchestrationEngine:
         self,
         project_client: Any = None,
         agent_manager: Any = None,
+        subconscious_mcp_url: str = "",
     ) -> None:
         self.project_client = project_client
         self.agent_manager = agent_manager
+        self.subconscious_mcp_url = subconscious_mcp_url
         # orchestration_id → record
         self._orchestrations: Dict[str, Dict[str, Any]] = {}
 
@@ -100,6 +102,7 @@ class FoundryOrchestrationEngine:
             "context": context or {},
             "workflow": workflow,
             "mcp_servers": mcp_servers or {},
+            "subconscious_mcp_url": self.subconscious_mcp_url,
             "metadata": metadata or {},
             "status": "active",
             "turns": [],

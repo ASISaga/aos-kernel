@@ -10,6 +10,10 @@ system with Foundry conversation threads.  Messages flow in both directions:
 
 All messages are posted directly to Foundry threads via the ``AgentsClient``
 (from ``azure-ai-projects``).
+
+When :attr:`subconscious_mcp_url` is configured, every bridged message is
+also persisted to the ``subconscious.asisaga.com`` MCP server so that
+conversation history is available across sessions and kernel restarts.
 """
 
 from __future__ import annotations
@@ -21,21 +25,32 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+#: HTTP timeout (seconds) for fire-and-forget persistence calls to subconscious.
+_SUBCONSCIOUS_PERSIST_TIMEOUT: float = 5.0
+#: HTTP timeout (seconds) for conversation retrieval calls to subconscious.
+_SUBCONSCIOUS_RETRIEVE_TIMEOUT: float = 10.0
+
 
 class FoundryMessageBridge:
     """Bidirectional message bridge between PurposeDrivenAgent and Foundry threads.
 
     :param agent_manager: The kernel's :class:`FoundryAgentManager`.
     :param orchestration_engine: The kernel's :class:`FoundryOrchestrationEngine`.
+    :param subconscious_mcp_url: URL of the subconscious MCP server for
+        conversation persistence.  When set, every inbound and outbound
+        message is also written to the subconscious store so that the full
+        conversation history survives kernel restarts.
     """
 
     def __init__(
         self,
         agent_manager: Any = None,
         orchestration_engine: Any = None,
+        subconscious_mcp_url: str = "",
     ) -> None:
         self.agent_manager = agent_manager
         self.orchestration_engine = orchestration_engine
+        self.subconscious_mcp_url = subconscious_mcp_url
         # message log: list of all bridged messages
         self._messages: List[Dict[str, Any]] = []
 
@@ -82,6 +97,7 @@ class FoundryMessageBridge:
             agent_id,
             orchestration_id,
         )
+        await self._persist_to_subconscious(record)
         return record
 
     # ------------------------------------------------------------------
@@ -141,6 +157,7 @@ class FoundryMessageBridge:
             agent_id,
             orchestration_id,
         )
+        await self._persist_to_subconscious(record)
         return record
 
     # ------------------------------------------------------------------
@@ -225,3 +242,97 @@ class FoundryMessageBridge:
     def message_count(self) -> int:
         """Total number of bridged messages."""
         return len(self._messages)
+
+    # ------------------------------------------------------------------
+    # Subconscious MCP persistence
+    # ------------------------------------------------------------------
+
+    async def _persist_to_subconscious(self, record: Dict[str, Any]) -> None:
+        """Persist a message record to the subconscious MCP server.
+
+        Calls the subconscious MCP server's ``store_conversation`` tool via
+        the standard MCP JSON-RPC protocol.  The call is fire-and-forget:
+        failures are logged as warnings and never propagate to the caller so
+        that conversation delivery is never blocked by persistence errors.
+
+        :param record: The message record to persist.
+        """
+        if not self.subconscious_mcp_url:
+            return
+        try:
+            import httpx
+
+            payload = {
+                "jsonrpc": "2.0",
+                "id": record["message_id"],
+                "method": "tools/call",
+                "params": {
+                    "name": "store_conversation",
+                    "arguments": {
+                        "message_id": record["message_id"],
+                        "orchestration_id": record.get("orchestration_id"),
+                        "agent_id": record["agent_id"],
+                        "direction": record["direction"],
+                        "content": record["content"],
+                        "metadata": record.get("metadata", {}),
+                        "timestamp": record["timestamp"],
+                    },
+                },
+            }
+            endpoint = f"{self.subconscious_mcp_url.rstrip('/')}/mcp"
+            async with httpx.AsyncClient(timeout=_SUBCONSCIOUS_PERSIST_TIMEOUT) as client:
+                response = await client.post(endpoint, json=payload)
+                response.raise_for_status()
+                logger.debug(
+                    "Persisted message %s to subconscious (orchestration=%s)",
+                    record["message_id"],
+                    record.get("orchestration_id"),
+                )
+        except Exception as exc:
+            logger.warning(
+                "Failed to persist message %s to subconscious: %s",
+                record.get("message_id"),
+                exc,
+            )
+
+    async def get_conversation_from_subconscious(
+        self,
+        orchestration_id: str,
+    ) -> List[Dict[str, Any]]:
+        """Retrieve persisted conversation history from the subconscious server.
+
+        Calls the subconscious MCP server's ``retrieve_conversation`` tool to
+        fetch all stored messages for the given orchestration.  Returns an
+        empty list when the subconscious URL is not configured or the call
+        fails.
+
+        :param orchestration_id: The orchestration whose history to retrieve.
+        :returns: List of persisted message records, oldest first.
+        """
+        if not self.subconscious_mcp_url:
+            return []
+        try:
+            import httpx
+
+            payload = {
+                "jsonrpc": "2.0",
+                "id": str(uuid.uuid4()),
+                "method": "tools/call",
+                "params": {
+                    "name": "retrieve_conversation",
+                    "arguments": {"orchestration_id": orchestration_id},
+                },
+            }
+            endpoint = f"{self.subconscious_mcp_url.rstrip('/')}/mcp"
+            async with httpx.AsyncClient(timeout=_SUBCONSCIOUS_RETRIEVE_TIMEOUT) as client:
+                response = await client.post(endpoint, json=payload)
+                response.raise_for_status()
+                data = response.json()
+                return data.get("result", {}).get("messages", [])
+        except Exception as exc:
+            logger.warning(
+                "Failed to retrieve conversation %s from subconscious: %s",
+                orchestration_id,
+                exc,
+            )
+            return []
