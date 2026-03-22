@@ -1,8 +1,8 @@
 # Technical Specification: Observability System
 
-**Document Version:** 2025.1.2  
+**Document Version:** 2026.1.0  
 **Status:** Implemented  
-**Date:** December 25, 2025  
+**Date:** March 22, 2026  
 **Module:** AgentOperatingSystem Observability (`src/AgentOperatingSystem/observability/`)
 
 ---
@@ -12,14 +12,189 @@
 The AOS Observability System provides comprehensive monitoring, logging, metrics collection, alerting, and tracing capabilities for the entire Agent Operating System. It enables deep visibility into system behavior, performance, and health.
 
 **Key Components:**
-- **Metrics** (`metrics.py`): Performance and operational metrics
+- **OTel Provider** (`otel.py`): OpenTelemetry-based traces, metrics, and logs — the primary observability interface
+- **Metrics** (`metrics.py`): Internal performance and operational metrics
 - **Logging** (`logging.py`): Structured logging infrastructure
-- **Tracing** (`tracing.py`): Distributed request tracing
+- **Tracing** (`tracing.py`): Distributed request tracing (internal)
 - **Alerting** (`alerting.py`): Alert management and notification
+- **Structured** (`structured.py`): Generic observability infrastructure
+
+### 1.1 Industry Standards Compliance
+
+The AOS observability system adheres to:
+
+- **[OpenTelemetry (OTel)](https://opentelemetry.io/)** — traces, metrics, and logs using the OTel SDK
+- **[OTel GenAI Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/)** — standard attribute names for GenAI agent operations
+- **[Microsoft Foundry Agent Tracing](https://learn.microsoft.com/azure/ai-studio/)** — integration with the Foundry Agent Service control plane
+- **[Azure Monitor / Application Insights](https://learn.microsoft.com/azure/azure-monitor/)** — production telemetry export via OTLP or Azure Monitor exporter
 
 ---
 
-## 2. Metrics System
+## 2. OpenTelemetry Integration (`otel.py`)
+
+### 2.1 AOSObservabilityProvider
+
+The `AOSObservabilityProvider` is the unified entry-point that configures all three OTel signals and is integrated into the kernel lifecycle.
+
+```python
+from AgentOperatingSystem.observability import AOSObservabilityProvider
+
+provider = AOSObservabilityProvider(
+    service_name="aos-kernel",
+    service_version="6.0.0",
+    environment="production",
+    otlp_endpoint="http://otel-collector:4317",
+    application_insights_connection_string="InstrumentationKey=...",
+)
+provider.setup()
+```
+
+The provider is automatically initialised and shut down as part of the kernel lifecycle:
+
+```python
+from AgentOperatingSystem import AgentOperatingSystem
+
+kernel = AgentOperatingSystem()
+await kernel.initialize()   # observability.setup() called automatically
+# ... use kernel ...
+await kernel.shutdown()      # observability.shutdown() called automatically
+```
+
+### 2.2 Configuration
+
+Configuration is provided via `KernelConfig` fields (sourced from environment variables):
+
+| Environment Variable | KernelConfig Field | Description |
+|---|---|---|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `otlp_endpoint` | OTLP collector endpoint (e.g. `http://localhost:4317`) |
+| `APPLICATIONINSIGHTS_CONNECTION_STRING` | `applicationinsights_connection_string` | Azure Application Insights connection string |
+| `OTEL_SERVICE_NAME` | `otel_service_name` | OTel service name (default: `aos-kernel`) |
+
+### 2.3 Distributed Tracing
+
+Traces follow the [OTel GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) with attributes like:
+
+| Attribute | Value | Description |
+|---|---|---|
+| `gen_ai.system` | `az.ai.foundry` | The GenAI system (Azure AI Foundry) |
+| `gen_ai.operation.name` | `register`, `invoke`, ... | Operation being performed |
+| `gen_ai.agent.id` | `ceo`, `cfo`, ... | Agent identifier |
+| `gen_ai.request.model` | `gpt-4o`, ... | Model deployment name |
+| `gen_ai.conversation.id` | thread/orchestration ID | Conversation/thread identifier |
+
+**Agent operation tracing:**
+
+```python
+with kernel.observability.trace_agent_operation(
+    "ceo", "invoke", model="gpt-4o", conversation_id="thread-42"
+) as span:
+    result = await kernel.run_agent_turn(orch_id, "ceo", "Set the agenda")
+    span.set_attribute("custom.turn_number", 1)
+```
+
+**Orchestration tracing:**
+
+```python
+with kernel.observability.trace_orchestration(
+    "orch-001", "Quarterly review", "collaborative"
+) as span:
+    await kernel.run_agent_turn(orch_id, "ceo", "Set the agenda")
+    await kernel.run_agent_turn(orch_id, "cfo", "Budget update")
+```
+
+### 2.4 Metrics
+
+The provider records both standard GenAI metrics and AOS-custom metrics:
+
+**Standard GenAI Metrics (per OTel GenAI spec):**
+
+| Metric | Type | Unit | Description |
+|---|---|---|---|
+| `gen_ai.client.operation.duration` | Histogram | `s` | Duration of GenAI client operations |
+| `gen_ai.client.token.usage` | Counter | `{token}` | Tokens consumed (with `gen_ai.token.type` attribute) |
+
+**AOS-Custom Metrics:**
+
+| Metric | Type | Unit | Description |
+|---|---|---|---|
+| `aos.agent.registrations` | Counter | `{registration}` | Agent registrations |
+| `aos.orchestration.created` | Counter | `{orchestration}` | Orchestrations created |
+| `aos.orchestration.duration` | Histogram | `s` | Orchestration duration |
+| `aos.messages.bridged` | Counter | `{message}` | Messages bridged (Foundry ↔ agent) |
+| `aos.governance.evaluations` | Counter | `{evaluation}` | Governance evaluations performed |
+
+**Recording metrics:**
+
+```python
+# Record an agent invocation with token usage
+kernel.observability.record_agent_invocation(
+    "ceo", model="gpt-4o", duration_s=1.2,
+    input_tokens=150, output_tokens=80,
+)
+
+# Record agent registration
+kernel.observability.record_agent_registration("ceo", model="gpt-4o")
+
+# Record orchestration creation
+kernel.observability.record_orchestration_created("orch-001", workflow="collaborative")
+
+# Record message bridging
+kernel.observability.record_message_bridged("foundry_to_agent", agent_id="ceo")
+```
+
+### 2.5 Governance and Evaluation
+
+Governance evaluations are recorded using the [OTel GenAI evaluation semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/):
+
+```python
+# Record a content safety evaluation
+kernel.observability.record_governance_evaluation(
+    evaluation_name="content_safety",
+    score_value=0.95,
+    score_label="pass",
+    agent_id="ceo",
+)
+
+# Evaluation attributes on the active span:
+# gen_ai.evaluation.name = "content_safety"
+# gen_ai.evaluation.score.value = 0.95
+# gen_ai.evaluation.score.label = "pass"
+```
+
+This integrates with:
+- **Microsoft Foundry Control Plane** guardrails (content filters, grounding checks)
+- **Azure AI Evaluation** (groundedness, relevance, coherence, fluency)
+- **Custom governance policies** (compliance, risk, audit)
+
+### 2.6 Exporters
+
+The provider supports multiple export targets, configured at initialisation:
+
+| Exporter | Requirement | Configuration |
+|---|---|---|
+| **OTLP gRPC** | `opentelemetry-exporter-otlp-proto-grpc` (in `pyproject.toml`) | `otlp_endpoint` |
+| **Azure Monitor** | `azure-monitor-opentelemetry-exporter` (optional) | `application_insights_connection_string` |
+| **In-Memory** | Built-in (always active) | Used for diagnostics and tests |
+| **Custom** | User-provided | `span_exporters` / `metric_readers` params |
+
+### 2.7 Health Check Integration
+
+The kernel `health_check` includes observability status:
+
+```python
+health = await kernel.health_check()
+# health["observability"] == {
+#     "observability_enabled": True,
+#     "otlp_endpoint": "http://localhost:4317",
+#     "application_insights": True,
+#     "service_name": "aos-kernel",
+#     "environment": "production",
+# }
+```
+
+---
+
+## 3. Internal Metrics System
 
 ### 2.1 Metrics Collection
 
@@ -1024,6 +1199,6 @@ postmortem = await incident.generate_postmortem(
 
 **Document Approval:**
 - **Status:** Implemented and Active (Sections 1-9), Specification for Future Development (Sections 10-11)
-- **Last Updated:** December 25, 2025
+- **Last Updated:** March 22, 2026
 - **Owner:** AOS Observability Team
-- **Next Review:** Q2 2026
+- **Next Review:** Q3 2026

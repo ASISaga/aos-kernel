@@ -96,9 +96,11 @@ class AgentOperatingSystem:
         self.lora_router: LoRAOrchestrationRouter = LoRAOrchestrationRouter(registry=self.lora_registry)
 
         # Observability subsystem
+        from AgentOperatingSystem import __version__ as _aos_version
+
         self.observability: AOSObservabilityProvider = observability or AOSObservabilityProvider(
             service_name=self.config.otel_service_name,
-            service_version="6.0.0",
+            service_version=_aos_version,
             environment=self.config.environment,
             otlp_endpoint=self.config.otlp_endpoint,
             application_insights_connection_string=self.config.applicationinsights_connection_string,

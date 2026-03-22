@@ -44,7 +44,7 @@ from __future__ import annotations
 import logging
 import time
 from contextlib import contextmanager
-from typing import Any, Dict, Iterator, Optional, Sequence
+from typing import Any, Dict, Iterator, List, Optional, Sequence
 
 from opentelemetry import metrics as otel_metrics
 from opentelemetry import trace as otel_trace
@@ -88,6 +88,7 @@ ATTR_GEN_AI_USAGE_OUTPUT_TOKENS = "gen_ai.usage.output_tokens"
 ATTR_GEN_AI_EVALUATION_NAME = "gen_ai.evaluation.name"
 ATTR_GEN_AI_EVALUATION_SCORE_VALUE = "gen_ai.evaluation.score.value"
 ATTR_GEN_AI_EVALUATION_SCORE_LABEL = "gen_ai.evaluation.score.label"
+ATTR_GEN_AI_TOKEN_TYPE = "gen_ai.token.type"
 
 # GenAI metric names (per OTel GenAI spec)
 METRIC_CLIENT_OPERATION_DURATION = "gen_ai.client.operation.duration"
@@ -365,12 +366,12 @@ class AOSObservabilityProvider:
             if input_tokens > 0:
                 self._token_usage_counter.add(
                     input_tokens,
-                    {**common_attrs, "gen_ai.token.type": "input"},
+                    {**common_attrs, ATTR_GEN_AI_TOKEN_TYPE: "input"},
                 )
             if output_tokens > 0:
                 self._token_usage_counter.add(
                     output_tokens,
-                    {**common_attrs, "gen_ai.token.type": "output"},
+                    {**common_attrs, ATTR_GEN_AI_TOKEN_TYPE: "output"},
                 )
 
     def record_agent_registration(self, agent_id: str, model: str = "") -> None:
@@ -550,7 +551,7 @@ class AOSObservabilityProvider:
 
     def _setup_metrics(self) -> None:
         """Configure ``MeterProvider`` with readers and create instruments."""
-        readers: list[MetricReader] = []
+        readers: List[MetricReader] = []
 
         # Always add an in-memory reader for diagnostics / tests
         self._in_memory_metric_reader = InMemoryMetricReader()
