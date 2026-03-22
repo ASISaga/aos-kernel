@@ -72,6 +72,20 @@ class KernelConfig(BaseModel):
         description="URL of the subconscious MCP server for conversation persistence (https://subconscious.asisaga.com)",
     )
 
+    # Observability settings
+    otlp_endpoint: str = Field(
+        default_factory=lambda: os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
+        description="OTLP collector endpoint for OpenTelemetry export (e.g. http://localhost:4317)",
+    )
+    applicationinsights_connection_string: str = Field(
+        default_factory=lambda: os.environ.get("APPLICATIONINSIGHTS_CONNECTION_STRING", ""),
+        description="Azure Application Insights connection string for Azure Monitor export",
+    )
+    otel_service_name: str = Field(
+        default_factory=lambda: os.environ.get("OTEL_SERVICE_NAME", "aos-kernel"),
+        description="OpenTelemetry service name",
+    )
+
     @classmethod
     def from_env(cls) -> "KernelConfig":
         """Create a :class:`KernelConfig` from environment variables.

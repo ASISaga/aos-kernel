@@ -42,6 +42,7 @@ from AgentOperatingSystem.config import KernelConfig
 from AgentOperatingSystem.agents import FoundryAgentManager
 from AgentOperatingSystem.orchestration import FoundryOrchestrationEngine
 from AgentOperatingSystem.messaging import FoundryMessageBridge
+from AgentOperatingSystem.observability import AOSObservabilityProvider
 from aos_intelligence.ml import LoRAAdapterRegistry, LoRAInferenceClient, LoRAOrchestrationRouter
 
 logger = logging.getLogger(__name__)
@@ -63,6 +64,7 @@ class AgentOperatingSystem:
         project_client: Any = None,
         lora_registry: Optional[LoRAAdapterRegistry] = None,
         inference_client: Any = None,
+        observability: Optional[AOSObservabilityProvider] = None,
     ) -> None:
         self.config = config or KernelConfig.from_env()
         self._project_client = project_client
@@ -93,6 +95,15 @@ class AgentOperatingSystem:
         )
         self.lora_router: LoRAOrchestrationRouter = LoRAOrchestrationRouter(registry=self.lora_registry)
 
+        # Observability subsystem
+        self.observability: AOSObservabilityProvider = observability or AOSObservabilityProvider(
+            service_name=self.config.otel_service_name,
+            service_version="6.0.0",
+            environment=self.config.environment,
+            otlp_endpoint=self.config.otlp_endpoint,
+            application_insights_connection_string=self.config.applicationinsights_connection_string,
+        )
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -122,6 +133,7 @@ class AgentOperatingSystem:
                 logger.warning("Failed to create AIProjectClient: %s", exc)
 
         self._initialized = True
+        self.observability.setup()
         logger.info(
             "AOS Kernel initialized (environment=%s, foundry=%s)",
             self.config.environment,
@@ -130,6 +142,7 @@ class AgentOperatingSystem:
 
     async def shutdown(self) -> None:
         """Gracefully shut down the kernel."""
+        self.observability.shutdown()
         self._initialized = False
         logger.info("AOS Kernel shut down")
 
@@ -446,4 +459,5 @@ class AgentOperatingSystem:
             "messages_bridged": self.message_bridge.message_count,
             "lora_adapters_registered": self.lora_registry.adapter_count,
             "subconscious_connected": bool(self.config.subconscious_mcp_url),
+            "observability": self.observability.get_status(),
         }
