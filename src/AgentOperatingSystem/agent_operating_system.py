@@ -36,7 +36,7 @@ Typical usage in an Azure Function::
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from AgentOperatingSystem.config import KernelConfig
 from AgentOperatingSystem.agents import FoundryAgentManager
@@ -44,6 +44,9 @@ from AgentOperatingSystem.orchestration import FoundryOrchestrationEngine
 from AgentOperatingSystem.messaging import FoundryMessageBridge
 from AgentOperatingSystem.observability import AOSObservabilityProvider
 from aos_intelligence.ml import LoRAAdapterRegistry, LoRAInferenceClient, LoRAOrchestrationRouter
+
+if TYPE_CHECKING:
+    from AgentOperatingSystem.copilot_runtime import CopilotRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -444,6 +447,39 @@ class AgentOperatingSystem:
             orchestration_id=orchestration_id,
             purpose=purpose,
             purpose_scope=purpose_scope,
+        )
+
+    # ------------------------------------------------------------------
+    # Copilot Runtime
+    # ------------------------------------------------------------------
+
+    def create_copilot_runtime(
+        self,
+        default_agent_id: str = "",
+        default_purpose: str = "Assist the user",
+    ) -> "CopilotRuntime":
+        """Create a :class:`~AgentOperatingSystem.copilot_runtime.CopilotRuntime`.
+
+        The runtime bridges ``@copilotkit/sdk-js`` frontend clients to this
+        kernel's :class:`FoundryOrchestrationEngine`, allowing CopilotKit
+        React applications to communicate directly with the AOS Foundry
+        orchestration.
+
+        Example — add to a FastAPI app::
+
+            runtime = kernel.create_copilot_runtime(default_agent_id="ceo")
+            app.include_router(runtime.fastapi_router())
+
+        :param default_agent_id: Agent used when a request does not specify one.
+        :param default_purpose: Purpose text for new orchestrations.
+        :returns: Configured :class:`~AgentOperatingSystem.copilot_runtime.CopilotRuntime`.
+        """
+        from AgentOperatingSystem.copilot_runtime import CopilotRuntime  # pylint: disable=import-outside-toplevel
+
+        return CopilotRuntime(
+            kernel=self,
+            default_agent_id=default_agent_id,
+            default_purpose=default_purpose,
         )
 
     # ------------------------------------------------------------------

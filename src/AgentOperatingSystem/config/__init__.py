@@ -71,6 +71,10 @@ class KernelConfig(BaseModel):
         default_factory=lambda: os.environ.get("SUBCONSCIOUS_MCP_URL", ""),
         description="URL of the subconscious MCP server for conversation persistence (https://subconscious.asisaga.com)",
     )
+    copilot_runtime_path: str = Field(
+        default_factory=lambda: os.environ.get("COPILOT_RUNTIME_PATH", "/copilotkit"),
+        description="URL path for the CopilotKit runtime endpoint (e.g. /copilotkit)",
+    )
 
     # Observability settings
     otlp_endpoint: str = Field(
