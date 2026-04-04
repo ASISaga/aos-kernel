@@ -11,6 +11,11 @@ Core components:
 - :class:`FoundryOrchestrationEngine` — orchestration via Foundry threads/runs
 - :class:`FoundryMessageBridge` — bidirectional PDA ↔ Foundry messaging
 
+Copilot Runtime:
+
+- :class:`~AgentOperatingSystem.copilot_runtime.CopilotRuntime` — bridges
+  ``@copilotkit/sdk-js`` clients to the Foundry orchestration engine
+
 Observability:
 
 - :class:`AOSObservabilityProvider` — OTel-based traces, metrics, logs
@@ -30,6 +35,7 @@ from AgentOperatingSystem.agents import FoundryAgentManager
 from AgentOperatingSystem.orchestration import FoundryOrchestrationEngine
 from AgentOperatingSystem.messaging import FoundryMessageBridge
 from AgentOperatingSystem.observability import AOSObservabilityProvider
+from AgentOperatingSystem.copilot_runtime import CopilotRuntime, CopilotMessage, CopilotRuntimeRequest
 from aos_intelligence.ml import LoRAAdapterRegistry, LoRAInferenceClient, LoRAOrchestrationRouter
 
 __all__ = [
@@ -39,6 +45,9 @@ __all__ = [
     "FoundryOrchestrationEngine",
     "FoundryMessageBridge",
     "AOSObservabilityProvider",
+    "CopilotRuntime",
+    "CopilotMessage",
+    "CopilotRuntimeRequest",
     "LoRAAdapterRegistry",
     "LoRAInferenceClient",
     "LoRAOrchestrationRouter",
